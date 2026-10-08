@@ -264,24 +264,98 @@ def reset_proxy_storage(
     print(f"{CYAN}[RESET-STORAGE]{RESET} File proxy ({json_path} & {txt_path}) berhasil di-reset menjadi {BOLD}0 proxy{RESET}.")
 
 
-def fetch_proxyscrape_proxies(countries: list[str] | None = None, timeout: float = 8.0) -> list[str]:
-    """Secondary fallback proxy provider using ProxyScrape free API."""
-    c_str = ",".join(countries) if countries else "US,GB,DE,CA,FR,AU,JP,NL,IT,ES,SG"
-    url = f"https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http,socks4,socks5&timeout=3000&country={c_str}&ssl=yes"
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    urls = []
+def fetch_proxyscrape_free_list(
+    limit: int = 300,
+    countries: list[str] | None = None,
+    protocols: list[str] | None = None,
+    timeout: float = 8.0
+) -> tuple[list[str], int]:
+    """
+    Fetch proxies from ProxyScrape official free-proxy-list GitHub mirror (via jsDelivr CDN).
+    Falls back to ProxyScrape v4 Live API if CDN is unavailable.
+    Filters by high CPM countries and supported protocols.
+    Returns (proxy_urls, total_found).
+    """
+    if countries is None:
+        countries = HIGH_CPM_COUNTRIES
+    target_countries = {c.upper() for c in countries} if countries else None
+    target_protocols = set(p.lower() for p in protocols) if protocols else {"http", "https", "socks4", "socks5"}
+
+    proxy_urls = []
+    seen = set()
+    dead_proxies = get_dead_proxies()
+    total_found = 0
+
+    # 1. Primary Source: jsDelivr CDN JSON Mirror
+    cdn_url = "https://cdn.jsdelivr.net/gh/proxyscrape/free-proxy-list@main/proxies/all/data.json"
     try:
+        req = urllib.request.Request(cdn_url, headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="ignore"))
+            if isinstance(data, list):
+                total_found = len(data)
+                candidates = []
+                for item in data:
+                    proto = (item.get("protocol") or "").lower()
+                    if proto not in target_protocols:
+                        continue
+                    cc = (item.get("country_code") or "").upper()
+                    if target_countries and cc and cc not in target_countries:
+                        continue
+                    ip = item.get("ip")
+                    port = item.get("port")
+                    if not ip or not port:
+                        continue
+                    candidates.append(item)
+
+                # Prioritaskan latency terendah dan uptime tertinggi
+                candidates.sort(key=lambda x: (
+                    float(x.get("latency_ms") or 9999.0),
+                    -float(x.get("uptime_percent") or 0.0)
+                ))
+
+                for item in candidates:
+                    proto = (item.get("protocol") or "http").lower()
+                    ip = item.get("ip")
+                    port = item.get("port")
+                    p_str = f"{proto}://{ip}:{port}"
+                    if p_str not in seen and p_str not in dead_proxies:
+                        seen.add(p_str)
+                        proxy_urls.append(p_str)
+                        if len(proxy_urls) >= limit:
+                            break
+                return proxy_urls, total_found
+    except Exception as e:
+        pass
+
+    # 2. Secondary Fallback: ProxyScrape v4 Live Public API
+    try:
+        c_param = ",".join([c.lower() for c in countries[:8]]) if countries else ""
+        api_url = f"https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=protocolipport&format=text"
+        if c_param:
+            api_url += f"&country={c_param}"
+        req = urllib.request.Request(api_url, headers={"User-Agent": USER_AGENT})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             text = resp.read().decode("utf-8", errors="ignore")
             for line in text.splitlines():
                 line = line.strip()
                 if line and ":" in line:
-                    if not line.startswith(("http://", "https://", "socks4://", "socks5://")):
-                        urls.append(f"http://{line}")
-                    else:
-                        urls.append(line)
+                    p_str = line if line.startswith(("http://", "https://", "socks4://", "socks5://")) else f"http://{line}"
+                    if p_str not in seen and p_str not in dead_proxies:
+                        seen.add(p_str)
+                        proxy_urls.append(p_str)
+                        if len(proxy_urls) >= limit:
+                            break
+            return proxy_urls, len(proxy_urls)
     except Exception:
         pass
+
+    return proxy_urls, total_found
+
+
+def fetch_proxyscrape_proxies(countries: list[str] | None = None, timeout: float = 8.0) -> list[str]:
+    """Secondary fallback proxy provider using ProxyScrape free API/CDN."""
+    urls, _ = fetch_proxyscrape_free_list(limit=250, countries=countries, timeout=timeout)
     return urls
 
 def fetch_backup_proxies_paginated(limit: int = 250, offset: int = 0, countries: list[str] | None = None) -> list[str]:
@@ -443,33 +517,74 @@ def get_and_verify_proxies(
 
     c_str = ", ".join(countries[:6]) + ("..." if len(countries) > 6 else "")
     print(f"\n{BOLD}{CYAN}==================================================================={RESET}")
-    print(f"{BOLD}    SMART PROXY ROTATION & PAGINATION (HIGH CPM AD-SENSE)           {RESET}")
+    print(f"{BOLD}    DUAL-SOURCE HYBRID PROXY (GEONODE + PROXYSCRAPE HIGH-CPM)       {RESET}")
     print(f"{BOLD}{CYAN}==================================================================={RESET}")
-    print(f"{CYAN}[PAGINASI]{RESET} Halaman {BOLD}{p_num}{RESET} (Rentang Items: {BOLD}{start_item} - {end_item}{RESET})")
+    print(f"{CYAN}[PAGINASI GEONODE]{RESET} Halaman {BOLD}{p_num}{RESET} (Rentang Items: {BOLD}{start_item} - {end_item}{RESET})")
     print(f"{CYAN}[KRITERIA]{RESET} Prioritas: {BOLD}{mode_desc}{RESET}")
     print(f"{CYAN}[NEGARA]  {RESET} {c_str}")
 
-    # 1. Fetch dari Geonode untuk rentang halaman tersebut
-    raw_proxies, total_found = fetch_geonode_proxies(
-        limit=limit,
-        page=p_num,
-        sort_by=s_by,
-        sort_type=s_type,
-        countries=countries
-    )
+    # 1. Fetch simultan dari Geonode dan ProxyScrape Mirror (jsDelivr CDN)
+    print(f"{CYAN}[DUAL-FETCH]{RESET} Mengambil proxy secara simultan dari Geonode & ProxyScrape...")
+    raw_geonode = []
+    raw_proxyscrape = []
 
-    # 2. Jika Geonode kosong / terkena rate-limit, ambil dari Mirror Paginated
+    with ThreadPoolExecutor(max_workers=2) as ingest_pool:
+        fut_geonode = ingest_pool.submit(
+            fetch_geonode_proxies,
+            limit=limit,
+            page=p_num,
+            sort_by=s_by,
+            sort_type=s_type,
+            countries=countries
+        )
+        fut_ps = ingest_pool.submit(
+            fetch_proxyscrape_free_list,
+            limit=limit,
+            countries=countries
+        )
+        try:
+            raw_geonode, _ = fut_geonode.result()
+        except Exception as e:
+            print(f"{YELLOW}[WARN] Error fetch Geonode: {e}{RESET}")
+            raw_geonode = []
+
+        try:
+            raw_proxyscrape, _ = fut_ps.result()
+        except Exception as e:
+            print(f"{YELLOW}[WARN] Error fetch ProxyScrape: {e}{RESET}")
+            raw_proxyscrape = []
+
+    print(f"{GREEN}[INGEST-OK]{RESET} Diperoleh: {BOLD}{len(raw_geonode)}{RESET} dari Geonode | {BOLD}{len(raw_proxyscrape)}{RESET} dari ProxyScrape")
+
+    # Interleave proxy baru dari kedua sumber agar terdistribusi merata
+    dead_proxies = get_dead_proxies()
+    interleaved_new = []
+    seen = set()
+    max_src_len = max(len(raw_geonode), len(raw_proxyscrape))
+    for i in range(max_src_len):
+        if i < len(raw_geonode):
+            p = raw_geonode[i]
+            if p not in seen and p not in dead_proxies:
+                seen.add(p)
+                interleaved_new.append(p)
+        if i < len(raw_proxyscrape):
+            p = raw_proxyscrape[i]
+            if p not in seen and p not in dead_proxies:
+                seen.add(p)
+                interleaved_new.append(p)
+
+    raw_proxies = interleaved_new
+
+    # 2. Jika total kandidat baru masih minim (< 30), ambil dari backup mirror
     if len(raw_proxies) < 30:
         offset = (p_num - 1) * limit
-        print(f"{CYAN}[INFO]{RESET} Mengisi stok dari High-CPM Mirror Paginated (Offset {offset})...")
+        print(f"{CYAN}[INFO]{RESET} Mengisi stok cadangan (Offset {offset})...")
         backup = fetch_backup_proxies_paginated(limit=limit, offset=offset, countries=countries)
-        dead_proxies = get_dead_proxies()
         for b in backup:
             if b not in raw_proxies and b not in dead_proxies:
                 raw_proxies.append(b)
 
     # 3. Load existing proxies jika merge_existing aktif
-    dead_proxies = get_dead_proxies()
     existing_candidates = []
     if merge_existing and os.path.exists(output_json):
         try:
@@ -484,11 +599,16 @@ def get_and_verify_proxies(
 
     combined_raw = list(dict.fromkeys(raw_proxies + existing_candidates))
 
+    # Batasi kandidat maksimal e.g. 400 agar waktu pengujian terkendali
+    max_test_candidates = max(limit * 2, 400)
+    if len(combined_raw) > max_test_candidates:
+        combined_raw = combined_raw[:max_test_candidates]
+
     if not combined_raw:
         print(f"{YELLOW}[WARN]{RESET} Tidak ada kandidat proxy baru untuk diuji.")
         return []
 
-    print(f"{GREEN}[OK]{RESET} Total {len(combined_raw)} kandidat proxy ({len(raw_proxies)} dari Halaman {p_num}, {len(existing_candidates)} existing).")
+    print(f"{GREEN}[OK]{RESET} Total {len(combined_raw)} kandidat proxy ({len(raw_proxies)} fresh hybrid, {len(existing_candidates)} existing).")
     print(f"{CYAN}[INFO]{RESET} Menguji handshake YouTube (443) dengan {threads} threads paralel...")
 
     parsed_list = []

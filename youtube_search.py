@@ -1856,19 +1856,19 @@ def main():
     parser.add_argument(
         "--skip-fetch",
         action="store_true",
-        help="Lewati download dan pengecekan proxy Geonode (gunakan cache file yang ada)"
+        help="Lewati download dan pengecekan proxy Geonode + ProxyScrape (gunakan cache file yang ada)"
     )
     parser.add_argument(
         "--proxy-limit",
         type=int,
         default=500,
-        help="Jumlah proxy yang diambil dari Geonode API (default: 500)"
+        help="Jumlah proxy yang diambil dari provider API (default: 500)"
     )
     parser.add_argument(
         "--proxy-threads",
         type=int,
         default=80,
-        help="Jumlah thread paralel untuk pengecekan proxy Geonode (default: 80)"
+        help="Jumlah thread paralel untuk pengecekan proxy (default: 80)"
     )
     parser.add_argument(
         "--proxy-reset-interval",
@@ -1935,7 +1935,7 @@ def main():
             safe_log("INIT", "Mode --skip-fetch aktif, memuat proxy dari cache lokal...", CYAN)
             proxy_list = load_proxies(args.proxy_file)
         else:
-            safe_log("INIT", "Mengambil & menguji batch awal proxy fresh dari Geonode...", CYAN)
+            safe_log("INIT", "Mengambil & menguji batch awal proxy fresh (Geonode + ProxyScrape)...", CYAN)
             try:
                 fresh_proxies = get_and_verify_proxies(
                     limit=args.proxy_limit,
@@ -1947,7 +1947,7 @@ def main():
                 if fresh_proxies:
                     proxy_list = load_proxies(args.proxy_file)
             except Exception as e:
-                safe_log("INIT", f"Gagal auto-fetch Geonode ({e}), melanjutkan...", YELLOW)
+                safe_log("INIT", f"Gagal auto-fetch proxy ({e}), melanjutkan...", YELLOW)
                 proxy_list = load_proxies(args.proxy_file)
 
         try:

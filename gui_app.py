@@ -492,7 +492,7 @@ class YouTubeStudioGUI:
         self.var_proxy_mode = tk.StringVar(value="geonode")
         self.var_proxy_mode.trace_add("write", self._on_proxy_mode_change)
         for mode_val, mode_title in [
-            ("geonode", "Auto Geonode (Rotasi Paginasi)"),
+            ("geonode", "Auto Hybrid (Geonode + ProxyScrape)"),
             ("local", "Cache Lokal (working_yt_proxies.txt)"),
             ("direct", "Direct (Tanpa Proxy)")
         ]:
@@ -538,7 +538,7 @@ class YouTubeStudioGUI:
         self.btn_stop.pack(side="left", padx=(0, 10))
 
         self.btn_refresh_proxy = tk.Button(
-            btn_bar, text="  🔄 UPDATE PROXY GEONODE  ", font=FONT_BOLD,
+            btn_bar, text="  🔄 UPDATE PROXY (HYBRID)  ", font=FONT_BOLD,
             bg=C_CARD_BORDER, fg=C_ACCENT_BLUE, activebackground=C_CARD_HOVER, activeforeground=C_TEXT_MAIN,
             relief="flat", cursor="hand2", padx=14, pady=7, command=self._refresh_proxies_async
         )
@@ -829,7 +829,7 @@ class YouTubeStudioGUI:
                 self._append_log("INIT", "Mode Cache Lokal: Penyimpanan di-reset ke 0.", "cyan")
                 proxy_list = load_proxies(config.proxy_file)
             else:
-                self._append_log("INIT", "Mengambil batch awal proxy fresh dari Geonode...", "cyan")
+                self._append_log("INIT", "Mengambil batch awal proxy fresh (Geonode + ProxyScrape)...", "cyan")
                 try:
                     fresh = get_and_verify_proxies(
                         limit=config.proxy_limit,
@@ -841,7 +841,7 @@ class YouTubeStudioGUI:
                     if fresh:
                         proxy_list = load_proxies(config.proxy_file)
                 except Exception as e:
-                    self._append_log("INIT", f"Gagal fetch Geonode ({e}), melanjutkan.", "yellow")
+                    self._append_log("INIT", f"Gagal fetch proxy ({e}), melanjutkan.", "yellow")
                     proxy_list = load_proxies(config.proxy_file)
 
             if len(proxy_list) == 0 and not config.skip_fetch:
@@ -1027,7 +1027,7 @@ class YouTubeStudioGUI:
     # =====================================================================
     def _refresh_proxies_async(self):
         self.btn_refresh_proxy.config(state="disabled")
-        self._append_log("GEONODE", "Mengambil batch proxy berikutnya (Paginasi Cerdas & High-CPM)...", "cyan")
+        self._append_log("HYBRID", "Mengambil batch proxy simultan (Geonode + ProxyScrape High-CPM)...", "cyan")
 
         def _task():
             try:
@@ -1043,11 +1043,11 @@ class YouTubeStudioGUI:
         self.btn_refresh_proxy.config(state="normal")
         live_cnt = self._get_live_proxy_count()
         self.metric_cards["proxies"].config(text=f"{live_cnt} Aktif")
-        self._append_log("GEONODE", f"Pembaruan selesai! {live_cnt} proxy aktif siap digunakan.", "green")
+        self._append_log("HYBRID", f"Pembaruan selesai! {live_cnt} proxy aktif siap digunakan.", "green")
 
     def _on_proxy_refresh_err(self, err_msg: str):
         self.btn_refresh_proxy.config(state="normal")
-        self._append_log("GEONODE", f"Gagal memperbarui proxy: {err_msg}", "red")
+        self._append_log("HYBRID", f"Gagal memperbarui proxy: {err_msg}", "red")
 
     def _on_close(self):
         if self.is_running:
