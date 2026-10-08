@@ -93,20 +93,14 @@ def safe_log(prefix: str, msg: str, color: str = CYAN):
         except Exception:
             pass
 
-def is_proxy_alive(proxy_url: str | None, timeout: float = 3.5) -> bool:
-    """Pre-check proxy TCP socket before opening browser (avoids ghost popups on dead proxies)."""
+def is_proxy_alive(proxy_url: str | None, timeout: float = 2.0) -> bool:
+    """Pre-check proxy YouTube 443 handshake before opening browser (avoids ghost/blank windows on dead proxies)."""
     if not proxy_url:
         return True
     try:
-        parsed = urlparse(proxy_url)
-        host, port = parsed.hostname, parsed.port
-        if not host or not port:
-            return False
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(timeout)
-        s.connect((host, port))
-        s.close()
-        return True
+        from yt_proxy_checker import check_proxy
+        res = check_proxy(proxy_url, connect_timeout=min(1.2, timeout), handshake_timeout=min(1.5, timeout))
+        return bool(res.get("alive"))
     except Exception:
         return False
 
@@ -358,6 +352,7 @@ def generate_stealth_script(fp: dict) -> str:
         }} catch(e) {{}}
 
         // 10. Auto-hide residual GDPR consent bump
+        // 10. Auto-hide residual GDPR consent bump & YouTube Premium / promo modals
         window.addEventListener('DOMContentLoaded', () => {{
             try {{
                 const s = document.createElement('style');
@@ -365,12 +360,40 @@ def generate_stealth_script(fp: dict) -> str:
                     ytd-consent-bump-v2-lightbox,
                     tp-yt-paper-dialog:has(#consent-bump),
                     .opened:has(#consent-bump),
-                    ytd-popup-container:has(ytd-consent-bump-v2-lightbox) {{
+                    ytd-popup-container:has(ytd-consent-bump-v2-lightbox),
+                    ytd-mealbar-promo-renderer,
+                    #mealbar-promo-renderer,
+                    ytd-popup-container:has(ytd-mealbar-promo-renderer),
+                    tp-yt-paper-dialog:has(ytd-mealbar-promo-renderer),
+                    yt-mealbar-promo-renderer,
+                    ytd-modal-with-title-and-button-renderer,
+                    ytd-popup-container:has(ytd-modal-with-title-and-button-renderer),
+                    tp-yt-iron-overlay-backdrop {{
                         display: none !important;
                     }}
                 `;
                 (document.head || document.documentElement).appendChild(s);
             }} catch(e) {{}}
+
+            // Auto-click dismiss buttons in background
+            setInterval(() => {{
+                try {{
+                    const dismissSelectors = [
+                        '#dismiss-button button',
+                        '#dismiss-button',
+                        'button[aria-label*="Dismiss"]',
+                        'button[aria-label*="Batal"]',
+                        'ytd-button-renderer:has-text("Lain kali") button',
+                        'yt-button-shape:has-text("Lain kali") button'
+                    ];
+                    for (const sel of dismissSelectors) {{
+                        const el = document.querySelector(sel);
+                        if (el && typeof el.click === 'function') {{
+                            el.click();
+                        }}
+                    }}
+                }} catch(e) {{}}
+            }}, 1500);
         }});
     """
 
@@ -380,6 +403,8 @@ def launch_isolated_context(p, headless: bool, proxy_url: str | None, user_data_
     win_h = 480
     browser_args = [
         "--disable-blink-features=AutomationControlled",
+        "--test-type",
+        "--disable-infobars",
         "--no-sandbox",
         "--disable-dev-shm-usage",
         "--disable-extensions",
@@ -457,7 +482,30 @@ def human_type(page, selector: str, text: str, min_delay_ms: int = 50, max_delay
         time.sleep(random.uniform(min_delay_ms / 1000.0, max_delay_ms / 1000.0))
 
 def handle_consent_popup(page):
-    """Handle and auto-dismiss any Google/YouTube GDPR consent dialog or redirect."""
+    """Handle and auto-dismiss any Google/YouTube GDPR consent or YouTube Premium / promo dialogs."""
+    # 0. Cek & dismiss YouTube Premium / Mealbar Promo modal
+    try:
+        promo_selectors = [
+            "#dismiss-button button",
+            "#dismiss-button",
+            "ytd-button-renderer:has-text('Lain kali')",
+            "button:has-text('Lain kali')",
+            "button:has-text('No thanks')",
+            "button:has-text('Dismiss')",
+            "button:has-text('Batal')",
+            "button:has-text('Not now')",
+            "ytd-mealbar-promo-renderer #dismiss-button",
+            "tp-yt-paper-dialog #dismiss-button"
+        ]
+        for p_sel in promo_selectors:
+            p_btn = page.locator(p_sel).first
+            if p_btn.is_visible(timeout=150):
+                p_btn.click()
+                time.sleep(0.3)
+                break
+    except Exception:
+        pass
+
     # 1. Cek redirect halaman penuh ke consent.youtube.com / consent.google.com
     try:
         cur_url = page.url.lower()
@@ -1154,6 +1202,10 @@ def check_player_error(page) -> bool:
                 const txt = (player.innerText || '').toLowerCase();
                 if (txt.includes('something went wrong') ||
                     txt.includes('terjadi kesalahan') ||
+                    txt.includes('terjadi error') ||
+                    txt.includes('id pemutaran') ||
+                    txt.includes('coba lagi nanti') ||
+                    txt.includes('pelajari lebih lanjut') ||
                     txt.includes('refresh or try again') ||
                     txt.includes('playback error') ||
                     txt.includes('an error occurred')) {
@@ -1397,6 +1449,7 @@ def watch_video_with_lock(page, worker_name: str, video_title: str, min_percent:
 
         # Check player health periodically (e.g. proxy dropped connection mid-stream)
         if int(elapsed) % 4 == 0:
+            handle_consent_popup(page)
             if check_bot_block(page):
                 safe_log(worker_name, "🚨 Terdeteksi blokir bot YouTube di tengah pemutaran! Mengganti proxy...", RED)
                 return False, elapsed, chosen_percent, total_duration, "BOT_BLOCKED"
@@ -1530,20 +1583,25 @@ def worker_process_main(worker_id: int, args, proxy_list: list, success_counter,
                         except Exception:
                             pass
 
-        # SMART PRE-CHECK: Cari proxy yang hidup via socket SEBELUM membuka browser (Cepat & Non-Blocking)
+        # SMART PRE-CHECK: Cari proxy yang hidup via YouTube handshake SEBELUM membuka browser (Cepat & Non-Blocking)
         proxy_url = None
         if not args.direct and local_proxies:
             found_alive = False
-            for _ in range(min(4, len(local_proxies))):
+            for _ in range(min(5, len(local_proxies))):
                 candidate = local_proxies[p_index % len(local_proxies)]
                 p_index += 1
-                if is_proxy_alive(candidate, timeout=1.5):
+                if is_proxy_alive(candidate, timeout=1.8):
                     proxy_url = candidate
                     found_alive = True
                     break
                 else:
                     if candidate in local_proxies:
                         local_proxies.remove(candidate)
+                    try:
+                        from geonode_fetcher import mark_proxy_dead
+                        mark_proxy_dead(candidate)
+                    except Exception:
+                        pass
 
             if not found_alive and local_proxies:
                 proxy_url = local_proxies[p_index % len(local_proxies)]
@@ -1752,7 +1810,13 @@ def worker_process_main(worker_id: int, args, proxy_list: list, success_counter,
                     elif status == "STREAMING_ERROR":
                         if proxy_url and proxy_url in local_proxies:
                             local_proxies.remove(proxy_url)
-                        safe_log(worker_name, f"Streaming error pada proxy. Lanjut ke proxy berikutnya untuk worker ini.", YELLOW)
+                        if proxy_url:
+                            try:
+                                from geonode_fetcher import mark_proxy_dead
+                                mark_proxy_dead(proxy_url)
+                            except Exception:
+                                pass
+                        safe_log(worker_name, f"Streaming error pada proxy. Proxy dicopot & ditandai mati.", YELLOW)
                     elif status == "WRONG_CHANNEL":
                         safe_log(worker_name, f"❌ Ditolak: Video bukan milik {target_chan.upper()}! Melanjutkan ke sesi berikutnya...", YELLOW)
 
@@ -1760,8 +1824,13 @@ def worker_process_main(worker_id: int, args, proxy_list: list, success_counter,
                 err_str = str(e).split("\n")[0]
                 if proxy_url and proxy_url in local_proxies:
                     local_proxies.remove(proxy_url)
-                # JANGAN hapus dari disk pada timeout sesaat, cukup rotasi di worker ini
-                safe_log(worker_name, f"Timeout ({err_str[:35]}). Lanjut proxy berikutnya.", YELLOW)
+                if proxy_url:
+                    try:
+                        from geonode_fetcher import mark_proxy_dead
+                        mark_proxy_dead(proxy_url)
+                    except Exception:
+                        pass
+                safe_log(worker_name, f"Timeout ({err_str[:35]}). Proxy dicopot & ditandai mati.", YELLOW)
                 send_telemetry(worker_id, "status_change", status="TIMEOUT", details=err_str[:30])
             except Exception as e:
                 err_str = str(e).split("\n")[0]
@@ -1769,14 +1838,13 @@ def worker_process_main(worker_id: int, args, proxy_list: list, success_counter,
                 if is_net_err:
                     if proxy_url and proxy_url in local_proxies:
                         local_proxies.remove(proxy_url)
-                    # Hanya tandai dead permanen jika soket TCP-nya memang benar-benar mati
-                    if proxy_url and not is_proxy_alive(proxy_url, timeout=2.0):
+                    if proxy_url:
                         try:
                             from geonode_fetcher import mark_proxy_dead
                             mark_proxy_dead(proxy_url)
                         except Exception:
                             pass
-                    safe_log(worker_name, f"Kendala koneksi ({err_str[:35]}). Lanjut proxy berikutnya.", YELLOW)
+                    safe_log(worker_name, f"Kendala koneksi ({err_str[:35]}). Proxy dicopot & ditandai mati.", YELLOW)
                     send_telemetry(worker_id, "status_change", status="ERROR_KONEKSI", details=err_str[:30])
                 else:
                     import traceback

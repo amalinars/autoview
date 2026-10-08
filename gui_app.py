@@ -1063,7 +1063,17 @@ class YouTubeStudioGUI:
 def main():
     root = tk.Tk()
     app = YouTubeStudioGUI(root)
-    root.mainloop()
+    try:
+        root.mainloop()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        try:
+            if getattr(app, "is_running", False):
+                app._stop_bot()
+        except Exception:
+            pass
+        os._exit(0)
 
 if __name__ == "__main__":
     main()
