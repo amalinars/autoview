@@ -2003,12 +2003,12 @@ def main():
             safe_log("INIT", "Mode --skip-fetch aktif, memuat proxy dari cache lokal...", CYAN)
             proxy_list = load_proxies(args.proxy_file)
         else:
-            safe_log("INIT", "Mengambil & menguji batch awal proxy fresh (Geonode + ProxyScrape)...", CYAN)
+            safe_log("INIT", "Mengambil & menguji batch awal proxy fresh Global (Geonode + ProxyScrape Semua Negara)...", CYAN)
             try:
                 fresh_proxies = get_and_verify_proxies(
                     limit=args.proxy_limit,
                     threads=args.proxy_threads,
-                    countries=HIGH_CPM_COUNTRIES,
+                    countries=None,
                     output_json=args.proxy_file or DEFAULT_OUTPUT_JSON,
                     merge_existing=False
                 )
@@ -2026,7 +2026,7 @@ def main():
                 threads=60,
                 output_json=args.proxy_file or DEFAULT_OUTPUT_JSON,
                 min_threshold=15,
-                countries=HIGH_CPM_COUNTRIES,
+                countries=None,
                 hourly_reset_sec=args.proxy_reset_interval
             )
         except Exception:

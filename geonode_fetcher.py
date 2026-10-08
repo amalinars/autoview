@@ -273,11 +273,9 @@ def fetch_proxyscrape_free_list(
     """
     Fetch proxies from ProxyScrape official free-proxy-list GitHub mirror (via jsDelivr CDN).
     Falls back to ProxyScrape v4 Live API if CDN is unavailable.
-    Filters by high CPM countries and supported protocols.
+    If countries is None, fetches all countries worldwide without filtering.
     Returns (proxy_urls, total_found).
     """
-    if countries is None:
-        countries = HIGH_CPM_COUNTRIES
     target_countries = {c.upper() for c in countries} if countries else None
     target_protocols = set(p.lower() for p in protocols) if protocols else {"http", "https", "socks4", "socks5"}
 
@@ -416,11 +414,10 @@ def fetch_geonode_proxies(
 ) -> tuple[list[str], int]:
     """
     Fetch exact page slice from Geonode API.
+    If countries is None, fetches all countries worldwide.
     Returns (proxy_urls, total_available).
     Handles 429 rate limit gracefully.
     """
-    if countries is None:
-        countries = HIGH_CPM_COUNTRIES
 
     state = load_pagination_state()
     cooldown_until = state.get("geonode_cooldown_until", 0)
@@ -501,8 +498,6 @@ def get_and_verify_proxies(
     """
     if output_json is None:
         output_json = DEFAULT_OUTPUT_JSON
-    if countries is None:
-        countries = HIGH_CPM_COUNTRIES
 
     # Jika page tidak ditentukan, gunakan paginasi pintar otomatis
     if page is None:
@@ -515,16 +510,17 @@ def get_and_verify_proxies(
         start_item = (p_num - 1) * limit + 1
         end_item = p_num * limit
 
-    c_str = ", ".join(countries[:6]) + ("..." if len(countries) > 6 else "")
+    # Default: Global (Semua negara jika countries is None)
+    c_str = (", ".join(countries[:6]) + ("..." if len(countries) > 6 else "")) if countries else "GLOBAL (Semua Negara / Worldwide)"
     print(f"\n{BOLD}{CYAN}==================================================================={RESET}")
-    print(f"{BOLD}    DUAL-SOURCE HYBRID PROXY (GEONODE + PROXYSCRAPE HIGH-CPM)       {RESET}")
+    print(f"{BOLD}    DUAL-SOURCE GLOBAL PROXY (GEONODE + PROXYSCRAPE ALL COUNTRIES)   {RESET}")
     print(f"{BOLD}{CYAN}==================================================================={RESET}")
     print(f"{CYAN}[PAGINASI GEONODE]{RESET} Halaman {BOLD}{p_num}{RESET} (Rentang Items: {BOLD}{start_item} - {end_item}{RESET})")
     print(f"{CYAN}[KRITERIA]{RESET} Prioritas: {BOLD}{mode_desc}{RESET}")
-    print(f"{CYAN}[NEGARA]  {RESET} {c_str}")
+    print(f"{CYAN}[CAKUPAN] {RESET} {c_str}")
 
     # 1. Fetch simultan dari Geonode dan ProxyScrape Mirror (jsDelivr CDN)
-    print(f"{CYAN}[DUAL-FETCH]{RESET} Mengambil proxy secara simultan dari Geonode & ProxyScrape...")
+    print(f"{CYAN}[DUAL-FETCH]{RESET} Mengambil proxy secara simultan dari Geonode & ProxyScrape (Global)...")
     raw_geonode = []
     raw_proxyscrape = []
 
@@ -539,7 +535,7 @@ def get_and_verify_proxies(
         )
         fut_ps = ingest_pool.submit(
             fetch_proxyscrape_free_list,
-            limit=limit,
+            limit=max(limit * 3, 2000),
             countries=countries
         )
         try:
@@ -599,8 +595,8 @@ def get_and_verify_proxies(
 
     combined_raw = list(dict.fromkeys(raw_proxies + existing_candidates))
 
-    # Batasi kandidat maksimal e.g. 400 agar waktu pengujian terkendali
-    max_test_candidates = max(limit * 2, 400)
+    # Batasi kandidat maksimal e.g. 1000 agar kolam proxy global melimpah
+    max_test_candidates = max(limit * 2, 1000)
     if len(combined_raw) > max_test_candidates:
         combined_raw = combined_raw[:max_test_candidates]
 
@@ -759,8 +755,6 @@ def start_background_proxy_replenisher(
     import threading
     if output_json is None:
         output_json = DEFAULT_OUTPUT_JSON
-    if countries is None:
-        countries = HIGH_CPM_COUNTRIES
 
     last_refill_time = 0
     last_hourly_reset = time.time()

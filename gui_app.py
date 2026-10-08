@@ -829,12 +829,12 @@ class YouTubeStudioGUI:
                 self._append_log("INIT", "Mode Cache Lokal: Penyimpanan di-reset ke 0.", "cyan")
                 proxy_list = load_proxies(config.proxy_file)
             else:
-                self._append_log("INIT", "Mengambil batch awal proxy fresh (Geonode + ProxyScrape)...", "cyan")
+                self._append_log("INIT", "Mengambil batch awal proxy fresh Global (Geonode + ProxyScrape Semua Negara)...", "cyan")
                 try:
                     fresh = get_and_verify_proxies(
                         limit=config.proxy_limit,
                         threads=config.proxy_threads,
-                        countries=HIGH_CPM_COUNTRIES,
+                        countries=None,
                         output_json=config.proxy_file or DEFAULT_OUTPUT_JSON,
                         merge_existing=False
                     )
@@ -866,7 +866,7 @@ class YouTubeStudioGUI:
                 threads=60,
                 output_json=config.proxy_file or DEFAULT_OUTPUT_JSON,
                 min_threshold=min_needed,
-                countries=HIGH_CPM_COUNTRIES,
+                countries=None,
                 hourly_reset_sec=3600
             )
 
@@ -1027,11 +1027,11 @@ class YouTubeStudioGUI:
     # =====================================================================
     def _refresh_proxies_async(self):
         self.btn_refresh_proxy.config(state="disabled")
-        self._append_log("HYBRID", "Mengambil batch proxy simultan (Geonode + ProxyScrape High-CPM)...", "cyan")
+        self._append_log("HYBRID", "Mengambil batch proxy simultan Global (Geonode + ProxyScrape Semua Negara)...", "cyan")
 
         def _task():
             try:
-                proxies = get_and_verify_proxies(limit=250, threads=60, countries=HIGH_CPM_COUNTRIES)
+                proxies = get_and_verify_proxies(limit=500, threads=80, countries=None)
                 alive_count = len(proxies)
                 self.root.after(0, lambda: self._on_proxy_refresh_done(alive_count))
             except Exception as e:
