@@ -1,0 +1,29 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Temporary profiles & runtime data
+yt_fresh_w*
+tempmediaStorage/
+*.tmp
+
+# Dynamic runtime state & proxy caches
+.dead_proxies.json
+.pagination_state.json
+.recent_videos.json
+.refill_trigger
+working_yt_proxies.json
+working_yt_proxies.txt
+video_watch_stats.json
+
+# Environments & IDEs
+.env
+.venv/
+env/
+venv/
+ENV/
+.vscode/
+.idea/
+*.swp
+*.swo
