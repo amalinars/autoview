@@ -1,10 +1,10 @@
 # autoview
 
-YouTube Multi-Process Isolated Batch Bot with Real-Time Web Telemetry Monitor & Triple-Source Dynamic Proxy Engine.
+YouTube Multi-Process Isolated Batch Bot with Real-Time Web Telemetry Monitor & Quad-Source Dynamic Proxy Engine.
 
 ## Fitur Utama
 - **Process Isolation**: Proses worker OS terpisah untuk stabilitas dan konkurensi tinggi.
-- **Triple-Source Proxy Engine**: Pengambilan proxy dari 3 provider sekaligus (**Geonode**, **ProxyScrape**, dan **Proxifly** 50.000+ proxy) dengan auto-replenish di background dan verifikasi latency live.
+- **Quad-Source Proxy Engine**: Pengambilan proxy dari 4 provider sekaligus (**Geonode**, **ProxyScrape**, **Proxifly** 50.000+ proxy, dan **TheSpeedX** SOCKS5/SOCKS4/HTTP) dengan auto-replenish di background dan verifikasi latency live.
 - **Real-Time Web Dashboard**: Web UI bertenaga Starlette + Server-Sent Events (SSE) untuk memantau status worker, durasi tonton, proxy aktif, dan views secara live.
 - **Smart Ad Skipping**: Otomatis mendeteksi dan melewati iklan (skippable & non-skippable).
 - **Humanized Interaction**: Simulasi pergerakan mouse mikro, kecepatan mengetik natural, dan jeda tonton dinamis.

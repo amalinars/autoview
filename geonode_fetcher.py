@@ -419,9 +419,91 @@ def fetch_proxifly_proxies(countries: list[str] | None = None, timeout: float = 
     urls, _ = fetch_proxifly_free_list(limit=500, countries=countries, timeout=timeout)
     return urls
 
+def fetch_thespeedx_free_list(
+    limit: int = 500,
+    protocols: list[str] | None = None,
+    timeout: float = 6.0
+) -> tuple[list[str], int]:
+    """
+    Fetch high-speed proxies from TheSpeedX official SOCKS-List repository
+    (https://github.com/TheSpeedX/SOCKS-List).
+    Supported protocols: socks5, socks4, http.
+    Uses jsDelivr CDN with GitHub raw fallback.
+    Returns (proxy_urls, total_found).
+    """
+    target_protocols = set(p.lower() for p in protocols) if protocols else {"http", "socks4", "socks5"}
+    dead_proxies = get_dead_proxies()
+    proxy_urls = []
+    seen = set()
+
+    sources = [
+        ("socks5", [
+            "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks5.txt",
+            "https://cdn.jsdelivr.net/gh/TheSpeedX/SOCKS-List@master/socks5.txt"
+        ]),
+        ("socks4", [
+            "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks4.txt",
+            "https://cdn.jsdelivr.net/gh/TheSpeedX/SOCKS-List@master/socks4.txt"
+        ]),
+        ("http", [
+            "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/http.txt",
+            "https://cdn.jsdelivr.net/gh/TheSpeedX/SOCKS-List@master/http.txt"
+        ])
+    ]
+
+    all_candidates = []
+
+    def _fetch_source(proto, urls):
+        res = []
+        for u in urls:
+            try:
+                req = urllib.request.Request(u, headers={"User-Agent": USER_AGENT})
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    lines = resp.read().decode("utf-8", errors="ignore").splitlines()
+                    for line in lines:
+                        line = line.strip()
+                        if line and ":" in line:
+                            p_str = f"{proto}://{line}"
+                            res.append(p_str)
+                    if res:
+                        break
+            except Exception:
+                continue
+        return res
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        futures = {
+            pool.submit(_fetch_source, proto, urls): proto
+            for proto, urls in sources
+            if proto in target_protocols
+        }
+        for fut in as_completed(futures):
+            try:
+                proxies = fut.result()
+                all_candidates.extend(proxies)
+            except Exception:
+                pass
+
+    total_found = len(all_candidates)
+    if all_candidates:
+        random.shuffle(all_candidates)
+        for p in all_candidates:
+            if p not in seen and p not in dead_proxies:
+                seen.add(p)
+                proxy_urls.append(p)
+                if len(proxy_urls) >= limit:
+                    break
+
+    return proxy_urls, total_found
+
+def fetch_thespeedx_proxies(limit: int = 500, protocols: list[str] | None = None, timeout: float = 6.0) -> list[str]:
+    """Helper returning list of TheSpeedX proxies."""
+    urls, _ = fetch_thespeedx_free_list(limit=limit, protocols=protocols, timeout=timeout)
+    return urls
+
 def fetch_backup_proxies_paginated(limit: int = 250, offset: int = 0, countries: list[str] | None = None) -> list[str]:
     """
-    Backup paginated proxies from ProxyScrape, Proxifly, and high-speed GitHub SOCKS/HTTP mirrors.
+    Backup paginated proxies from ProxyScrape, Proxifly, TheSpeedX, and high-speed GitHub SOCKS/HTTP mirrors.
     Rotates through offset so duplicate proxies are avoided.
     """
     dead_proxies = get_dead_proxies()
@@ -451,31 +533,17 @@ def fetch_backup_proxies_paginated(limit: int = 250, offset: int = 0, countries:
         except Exception:
             pass
 
-    # 2. SOCKS-List GitHub mirror jika masih butuh tambahan
+    # 3. TheSpeedX SOCKS-List (SOCKS5, SOCKS4, HTTP)
     if len(results) < limit:
-        needed = limit - len(results)
-        mirror_urls = [
-            "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks5.txt",
-            "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/http.txt"
-        ]
-        for m_url in mirror_urls:
-            if len(results) >= limit:
-                break
-            try:
-                proto = "socks5" if "socks5" in m_url else "http"
-                req = urllib.request.Request(m_url, headers={"User-Agent": USER_AGENT})
-                with urllib.request.urlopen(req, timeout=5.0) as resp:
-                    lines = resp.read().decode("utf-8", errors="ignore").splitlines()
-                    chunk = lines[offset:offset + needed] if offset < len(lines) else lines[:needed]
-                    for line in chunk:
-                        line = line.strip()
-                        if line and ":" in line:
-                            p_str = f"{proto}://{line}"
-                            if p_str not in seen and p_str not in dead_proxies:
-                                seen.add(p_str)
-                                results.append(p_str)
-            except Exception:
-                pass
+        try:
+            speedx_list = fetch_thespeedx_proxies(limit=limit * 2, timeout=6.0)
+            sliced_sx = speedx_list[offset:offset + limit] if offset < len(speedx_list) else speedx_list[:limit]
+            for p in sliced_sx:
+                if p not in seen and p not in dead_proxies:
+                    seen.add(p)
+                    results.append(p)
+        except Exception:
+            pass
 
     return results[:limit]
 
@@ -588,19 +656,20 @@ def get_and_verify_proxies(
     # Default: Global (Semua negara jika countries is None)
     c_str = (", ".join(countries[:6]) + ("..." if len(countries) > 6 else "")) if countries else "GLOBAL (Semua Negara / Worldwide)"
     print(f"\n{BOLD}{CYAN}==================================================================={RESET}")
-    print(f"{BOLD}    TRIPLE-SOURCE GLOBAL PROXY (GEONODE + PROXYSCRAPE + PROXIFLY)  {RESET}")
+    print(f"{BOLD}    QUAD-SOURCE GLOBAL PROXY (GEONODE + PROXYSCRAPE + PROXIFLY + THESPEEDX)  {RESET}")
     print(f"{BOLD}{CYAN}==================================================================={RESET}")
     print(f"{CYAN}[PAGINASI GEONODE]{RESET} Halaman {BOLD}{p_num}{RESET} (Rentang Items: {BOLD}{start_item} - {end_item}{RESET})")
     print(f"{CYAN}[KRITERIA]{RESET} Prioritas: {BOLD}{mode_desc}{RESET}")
     print(f"{CYAN}[CAKUPAN] {RESET} {c_str}")
 
-    # 1. Fetch simultan dari Geonode, ProxyScrape, dan Proxifly Mirror
-    print(f"{CYAN}[TRIPLE-FETCH]{RESET} Mengambil proxy secara simultan dari Geonode, ProxyScrape & Proxifly (Global)...")
+    # 1. Fetch simultan dari Geonode, ProxyScrape, Proxifly, dan TheSpeedX
+    print(f"{CYAN}[QUAD-FETCH]{RESET} Mengambil proxy secara simultan dari Geonode, ProxyScrape, Proxifly & TheSpeedX (Global)...")
     raw_geonode = []
     raw_proxyscrape = []
     raw_proxifly = []
+    raw_thespeedx = []
 
-    with ThreadPoolExecutor(max_workers=3) as ingest_pool:
+    with ThreadPoolExecutor(max_workers=4) as ingest_pool:
         fut_geonode = ingest_pool.submit(
             fetch_geonode_proxies,
             limit=limit,
@@ -618,6 +687,10 @@ def get_and_verify_proxies(
             fetch_proxifly_free_list,
             limit=max(limit * 2, 1500),
             countries=countries
+        )
+        fut_sx = ingest_pool.submit(
+            fetch_thespeedx_free_list,
+            limit=max(limit * 2, 1500)
         )
         try:
             raw_geonode, _ = fut_geonode.result()
@@ -637,13 +710,19 @@ def get_and_verify_proxies(
             print(f"{YELLOW}[WARN] Error fetch Proxifly: {e}{RESET}")
             raw_proxifly = []
 
-    print(f"{GREEN}[INGEST-OK]{RESET} Diperoleh: {BOLD}{len(raw_geonode)}{RESET} dari Geonode | {BOLD}{len(raw_proxyscrape)}{RESET} dari ProxyScrape | {BOLD}{len(raw_proxifly)}{RESET} dari Proxifly")
+        try:
+            raw_thespeedx, _ = fut_sx.result()
+        except Exception as e:
+            print(f"{YELLOW}[WARN] Error fetch TheSpeedX: {e}{RESET}")
+            raw_thespeedx = []
 
-    # Interleave proxy baru dari ketiga sumber agar terdistribusi merata
+    print(f"{GREEN}[INGEST-OK]{RESET} Diperoleh: {BOLD}{len(raw_geonode)}{RESET} dari Geonode | {BOLD}{len(raw_proxyscrape)}{RESET} dari ProxyScrape | {BOLD}{len(raw_proxifly)}{RESET} dari Proxifly | {BOLD}{len(raw_thespeedx)}{RESET} dari TheSpeedX")
+
+    # Interleave proxy baru dari keempat sumber agar terdistribusi merata
     dead_proxies = get_dead_proxies()
     interleaved_new = []
     seen = set()
-    max_src_len = max(len(raw_geonode), len(raw_proxyscrape), len(raw_proxifly))
+    max_src_len = max(len(raw_geonode), len(raw_proxyscrape), len(raw_proxifly), len(raw_thespeedx))
     for i in range(max_src_len):
         if i < len(raw_geonode):
             p = raw_geonode[i]
@@ -657,6 +736,11 @@ def get_and_verify_proxies(
                 interleaved_new.append(p)
         if i < len(raw_proxifly):
             p = raw_proxifly[i]
+            if p not in seen and p not in dead_proxies:
+                seen.add(p)
+                interleaved_new.append(p)
+        if i < len(raw_thespeedx):
+            p = raw_thespeedx[i]
             if p not in seen and p not in dead_proxies:
                 seen.add(p)
                 interleaved_new.append(p)
