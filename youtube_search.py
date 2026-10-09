@@ -1978,6 +1978,30 @@ def main():
         default=120,
         help="Delay ketik maksimum dalam ms (default: 120)"
     )
+    parser.add_argument(
+        "--web",
+        action="store_true",
+        default=True,
+        help="Aktifkan Web Dashboard real-time di browser (default: True)"
+    )
+    parser.add_argument(
+        "--no-web",
+        action="store_false",
+        dest="web",
+        help="Nonaktifkan Web Dashboard"
+    )
+    parser.add_argument(
+        "--web-port",
+        type=int,
+        default=5000,
+        help="Port lokal untuk Web Dashboard (default: 5000)"
+    )
+    parser.add_argument(
+        "--web-host",
+        type=str,
+        default="127.0.0.1",
+        help="Host untuk Web Dashboard (default: 127.0.0.1)"
+    )
 
     args = parser.parse_args()
     args.headless = not args.headed
@@ -2032,6 +2056,25 @@ def main():
         except Exception:
             pass
 
+    # Inisialisasi Web Dashboard Real-Time jika diaktifkan
+    telemetry_q = None
+    if args.web:
+        try:
+            from web_dashboard import start_web_dashboard
+            telemetry_q = multiprocessing.Queue()
+            web_cfg = {
+                "batch_count": args.batch_count,
+                "infinite": args.infinite,
+                "keyword": args.keyword,
+                "channel": args.channel,
+                "workers": args.workers,
+                "proxy_count": len(proxy_list)
+            }
+            start_web_dashboard(telemetry_q, host=args.web_host, port=args.web_port, initial_config=web_cfg)
+        except Exception as e:
+            safe_log("WEB", f"Gagal memulai Web Dashboard: {e}", YELLOW)
+            telemetry_q = None
+
     print(f"\n{BOLD}==================================================================={RESET}")
     print(f"{BOLD}    YOUTUBE MULTI-PROCESS ISOLATED BOT (SYSTEM WATCH LOCK)         {RESET}")
     print(f"{BOLD}==================================================================={RESET}")
@@ -2042,13 +2085,15 @@ def main():
     print(f"{CYAN}Pool Proxy        :{RESET} {len(proxy_list)} Proxy" if proxy_list else "Direct (Tanpa Proxy)")
     print(f"{CYAN}Rentang Durasi    :{RESET} {args.min_percent}% - {args.max_percent}% dari durasi video")
     print(f"{CYAN}Mode Browser      :{RESET} {'Tampilan Layar (Headed)' if args.headed else 'Headless (Ultra Ringan, Low CPU/RAM)'}")
+    if args.web and telemetry_q is not None:
+        print(f"{CYAN}Web Dashboard     :{RESET} {BOLD}http://{args.web_host}:{args.web_port}{RESET} (Live Real-Time)")
     print("=" * 67 + "\n")
 
     processes = []
     for w_id in range(1, args.workers + 1):
         p = multiprocessing.Process(
             target=worker_process_main,
-            args=(w_id, args, proxy_list, success_counter, stop_event),
+            args=(w_id, args, proxy_list, success_counter, stop_event, telemetry_q),
             daemon=True
         )
         p.start()
@@ -2070,6 +2115,11 @@ def main():
         stop_event.set()
     finally:
         stop_event.set()
+        if telemetry_q is not None:
+            try:
+                telemetry_q.put({"event": "SHUTDOWN"})
+            except Exception:
+                pass
         for p in processes:
             if p.is_alive():
                 p.terminate()
