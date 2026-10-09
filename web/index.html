@@ -1,0 +1,822 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AutoView • Live Worker Monitor</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-base: #0a0d14;
+            --bg-surface: #101623;
+            --bg-card: rgba(18, 25, 40, 0.75);
+            --bg-card-hover: rgba(24, 34, 54, 0.9);
+            --border-subtle: rgba(255, 255, 255, 0.08);
+            --border-focus: rgba(99, 102, 241, 0.4);
+            
+            --text-main: #f1f5f9;
+            --text-muted: #94a3b8;
+            --text-dim: #64748b;
+
+            --primary: #6366f1;
+            --primary-glow: rgba(99, 102, 241, 0.25);
+            --cyan: #06b6d4;
+            --cyan-glow: rgba(6, 182, 212, 0.2);
+            --success: #10b981;
+            --success-glow: rgba(16, 185, 129, 0.25);
+            --warning: #f59e0b;
+            --warning-glow: rgba(245, 158, 11, 0.25);
+            --danger: #ef4444;
+            --danger-glow: rgba(239, 68, 68, 0.25);
+            --purple: #a855f7;
+            --purple-glow: rgba(168, 85, 247, 0.25);
+
+            --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-base);
+            color: var(--text-main);
+            font-family: var(--font-sans);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow-x: hidden;
+            background-image: 
+                radial-gradient(circle at 15% 10%, rgba(99, 102, 241, 0.12) 0%, transparent 40%),
+                radial-gradient(circle at 85% 85%, rgba(6, 182, 212, 0.08) 0%, transparent 45%);
+            background-attachment: fixed;
+        }
+
+        /* Ambient Glow Bar at top */
+        .top-glow-bar {
+            height: 3px;
+            background: linear-gradient(90deg, #6366f1, #06b6d4, #10b981, #a855f7);
+            width: 100%;
+        }
+
+        /* Container */
+        .container {
+            max-width: 1440px;
+            margin: 0 auto;
+            padding: 24px 32px 48px;
+            width: 100%;
+            flex: 1;
+        }
+
+        /* Header */
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding-bottom: 24px;
+            border-bottom: 1px solid var(--border-subtle);
+            flex-wrap: wrap;
+            gap: 16px;
+        }
+
+        .brand-section {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .brand-icon {
+            width: 44px;
+            height: 44px;
+            background: linear-gradient(135deg, #6366f1, #06b6d4);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 16px var(--primary-glow);
+        }
+
+        .brand-icon svg {
+            width: 24px;
+            height: 24px;
+            fill: #ffffff;
+        }
+
+        .brand-text h1 {
+            font-size: 20px;
+            font-weight: 800;
+            letter-spacing: -0.02em;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .brand-text h1 span {
+            background: linear-gradient(90deg, #818cf8, #22d3ee);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .brand-text p {
+            font-size: 13px;
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+
+        .header-meta {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .status-badge-live {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 7px 14px;
+            border-radius: 9999px;
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            color: #34d399;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+
+        .status-badge-live .pulse-dot {
+            width: 8px;
+            height: 8px;
+            background-color: #10b981;
+            border-radius: 50%;
+            box-shadow: 0 0 10px #10b981;
+            animation: pulse 1.8s infinite;
+        }
+
+        .status-badge-live.reconnecting {
+            background: rgba(245, 158, 11, 0.1);
+            border-color: rgba(245, 158, 11, 0.3);
+            color: #fbbf24;
+        }
+
+        .status-badge-live.reconnecting .pulse-dot {
+            background-color: #f59e0b;
+            box-shadow: 0 0 10px #f59e0b;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.9); opacity: 0.7; }
+            50% { transform: scale(1.3); opacity: 1; }
+            100% { transform: scale(0.9); opacity: 0.7; }
+        }
+
+        /* Metrics Row */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+            gap: 16px;
+            margin: 28px 0 32px;
+        }
+
+        .metric-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            backdrop-filter: blur(12px);
+            border-radius: 16px;
+            padding: 18px 20px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            transition: all 0.2s ease;
+        }
+
+        .metric-card:hover {
+            border-color: var(--border-focus);
+            transform: translateY(-2px);
+            background: var(--bg-card-hover);
+        }
+
+        .metric-icon {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            flex-shrink: 0;
+        }
+
+        .metric-icon.blue { background: rgba(99, 102, 241, 0.15); color: #818cf8; }
+        .metric-icon.green { background: rgba(16, 185, 129, 0.15); color: #34d399; }
+        .metric-icon.amber { background: rgba(245, 158, 11, 0.15); color: #fbbf24; }
+        .metric-icon.cyan { background: rgba(6, 182, 212, 0.15); color: #22d3ee; }
+        .metric-icon.purple { background: rgba(168, 85, 247, 0.15); color: #c084fc; }
+
+        .metric-info {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            overflow: hidden;
+        }
+
+        .metric-label {
+            font-size: 12px;
+            color: var(--text-muted);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .metric-value {
+            font-size: 22px;
+            font-weight: 800;
+            color: var(--text-main);
+            font-feature-settings: "tnum";
+            white-space: nowrap;
+        }
+
+        /* Section Title */
+        .section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+        }
+
+        .section-title {
+            font-size: 16px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--text-main);
+        }
+
+        .worker-count-tag {
+            background: rgba(255, 255, 255, 0.08);
+            padding: 2px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--cyan);
+        }
+
+        /* Worker Grid */
+        #worker-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+            gap: 20px;
+        }
+
+        /* Worker Card */
+        .worker-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 18px;
+            padding: 20px;
+            backdrop-filter: blur(14px);
+            transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .worker-card:hover {
+            border-color: rgba(99, 102, 241, 0.35);
+            background: var(--bg-card-hover);
+            transform: translateY(-3px);
+            box-shadow: 0 12px 30px -10px rgba(0, 0, 0, 0.5);
+        }
+
+        /* Header of Card */
+        .worker-card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .worker-id-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .worker-badge {
+            background: linear-gradient(135deg, #4f46e5, #06b6d4);
+            color: #ffffff;
+            font-weight: 800;
+            font-size: 12px;
+            padding: 3px 10px;
+            border-radius: 8px;
+            font-family: var(--font-mono);
+            letter-spacing: 0.02em;
+        }
+
+        .worker-pid {
+            font-size: 12px;
+            color: var(--text-dim);
+            font-family: var(--font-mono);
+            font-weight: 500;
+        }
+
+        /* State Badge */
+        .status-pill {
+            font-size: 11px;
+            font-weight: 700;
+            padding: 4px 10px;
+            border-radius: 999px;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s ease;
+        }
+
+        .status-pill.blue {
+            background: rgba(56, 189, 248, 0.12);
+            color: #38bdf8;
+            border: 1px solid rgba(56, 189, 248, 0.3);
+        }
+        .status-pill.green {
+            background: rgba(52, 211, 153, 0.12);
+            color: #34d399;
+            border: 1px solid rgba(52, 211, 153, 0.3);
+        }
+        .status-pill.amber {
+            background: rgba(251, 191, 36, 0.12);
+            color: #fbbf24;
+            border: 1px solid rgba(251, 191, 36, 0.3);
+        }
+        .status-pill.purple {
+            background: rgba(167, 139, 250, 0.12);
+            color: #a78bfa;
+            border: 1px solid rgba(167, 139, 250, 0.3);
+        }
+        .status-pill.red {
+            background: rgba(248, 113, 113, 0.12);
+            color: #f87171;
+            border: 1px solid rgba(248, 113, 113, 0.3);
+        }
+
+        /* Video Info */
+        .video-box {
+            background: rgba(0, 0, 0, 0.25);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            border-radius: 12px;
+            padding: 12px 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .video-box-header {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            color: var(--text-dim);
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .video-box-header svg {
+            width: 14px;
+            height: 14px;
+            fill: #ef4444;
+        }
+
+        .video-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-main);
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            line-height: 1.4;
+            min-height: 36px;
+        }
+
+        .worker-details {
+            font-size: 12px;
+            color: var(--text-muted);
+            font-style: italic;
+        }
+
+        /* Progress Section */
+        .progress-section {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .progress-labels {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            font-family: var(--font-mono);
+            font-weight: 500;
+        }
+
+        .progress-timer {
+            color: var(--text-muted);
+        }
+
+        .progress-pct {
+            font-weight: 700;
+            color: var(--cyan);
+        }
+
+        .progress-bar-track {
+            height: 8px;
+            background: rgba(255, 255, 255, 0.07);
+            border-radius: 999px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #6366f1, #06b6d4, #10b981);
+            border-radius: 999px;
+            transition: width 0.4s ease;
+        }
+
+        /* Card Footer */
+        .worker-card-footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding-top: 10px;
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .proxy-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(255, 255, 255, 0.04);
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-family: var(--font-mono);
+            font-size: 11px;
+            color: var(--text-main);
+            max-width: 220px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .proxy-pill svg {
+            width: 12px;
+            height: 12px;
+            fill: var(--cyan);
+            flex-shrink: 0;
+        }
+
+        .ads-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--warning);
+            background: rgba(245, 158, 11, 0.1);
+            padding: 3px 8px;
+            border-radius: 6px;
+        }
+
+        /* Empty State */
+        .empty-state {
+            grid-column: 1 / -1;
+            padding: 48px 24px;
+            text-align: center;
+            background: var(--bg-card);
+            border: 1px dashed var(--border-subtle);
+            border-radius: 16px;
+            color: var(--text-muted);
+        }
+
+        .empty-state p {
+            margin-top: 8px;
+            font-size: 14px;
+        }
+
+        /* Footer */
+        footer {
+            margin-top: auto;
+            padding: 20px 32px;
+            border-top: 1px solid var(--border-subtle);
+            text-align: center;
+            font-size: 12px;
+            color: var(--text-dim);
+        }
+
+        @media (max-width: 768px) {
+            .container { padding: 16px; }
+            #worker-grid { grid-template-columns: 1fr; }
+            .metrics-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+    </style>
+</head>
+<body>
+    <div class="top-glow-bar"></div>
+    <div class="container">
+        <!-- Header -->
+        <header>
+            <div class="brand-section">
+                <div class="brand-icon">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M10 16.5l6-4.5-6-4.5v9zM12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/>
+                    </svg>
+                </div>
+                <div class="brand-text">
+                    <h1>AutoView <span>Live Monitor</span></h1>
+                    <p id="target-subtitle">YouTube Multi-Process Automation</p>
+                </div>
+            </div>
+
+            <div class="header-meta">
+                <div id="live-indicator" class="status-badge-live">
+                    <span class="pulse-dot"></span>
+                    <span id="live-text">Live Telemetry</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Metrics Row -->
+        <div class="metrics-grid">
+            <div class="metric-card">
+                <div class="metric-icon green">✔</div>
+                <div class="metric-info">
+                    <span class="metric-label">Views Selesai</span>
+                    <span id="metric-views" class="metric-value">0 / 0</span>
+                </div>
+            </div>
+
+            <div class="metric-card">
+                <div class="metric-icon amber">⚡</div>
+                <div class="metric-info">
+                    <span class="metric-label">Ads Terlewati</span>
+                    <span id="metric-ads" class="metric-value">0 ads</span>
+                </div>
+            </div>
+
+            <div class="metric-card">
+                <div class="metric-icon blue">⚙</div>
+                <div class="metric-info">
+                    <span class="metric-label">Worker Aktif</span>
+                    <span id="metric-workers" class="metric-value">0</span>
+                </div>
+            </div>
+
+            <div class="metric-card">
+                <div class="metric-icon cyan">🌐</div>
+                <div class="metric-info">
+                    <span class="metric-label">Proxy Pool</span>
+                    <span id="metric-proxies" class="metric-value">0 Aktif</span>
+                </div>
+            </div>
+
+            <div class="metric-card">
+                <div class="metric-icon purple">⏱</div>
+                <div class="metric-info">
+                    <span class="metric-label">Waktu Berjalan</span>
+                    <span id="metric-uptime" class="metric-value">00:00:00</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Worker Cards Section -->
+        <div class="section-header">
+            <div class="section-title">
+                Status Worker Real-Time
+                <span id="worker-count-badge" class="worker-count-tag">0 Worker</span>
+            </div>
+        </div>
+
+        <div id="worker-grid">
+            <div class="empty-state" id="empty-state">
+                <p>Menunggu inisialisasi worker proses...</p>
+            </div>
+        </div>
+    </div>
+
+    <footer>
+        AutoView Telemetry Monitor • Process-Isolated Browser Engine
+    </footer>
+
+    <script>
+        function formatTime(seconds) {
+            const sec = Math.floor(seconds || 0);
+            const m = Math.floor(sec / 60);
+            const s = sec % 60;
+            const h = Math.floor(m / 60);
+            const remM = m % 60;
+            if (h > 0) {
+                return `${String(h).padStart(2, '0')}:${String(remM).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+            }
+            return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+        }
+
+        let localUptimeBase = 0;
+        let uptimeTimer = null;
+
+        function updateSummary(summary) {
+            if (!summary) return;
+
+            const target = summary.is_infinite ? '∞' : summary.batch_target;
+            document.getElementById('metric-views').textContent = `${summary.total_views || 0} / ${target}`;
+            document.getElementById('metric-ads').textContent = `${summary.total_ads_skipped || 0} ads`;
+            document.getElementById('metric-workers').textContent = summary.active_workers || 0;
+            document.getElementById('metric-proxies').textContent = `${summary.active_proxies || 0} Aktif`;
+
+            if (summary.keyword) {
+                const chan = summary.channel ? ` • @${summary.channel}` : '';
+                document.getElementById('target-subtitle').textContent = `Keyword: "${summary.keyword}"${chan}`;
+            }
+
+            localUptimeBase = summary.uptime_seconds || 0;
+            renderUptime();
+        }
+
+        function renderUptime() {
+            document.getElementById('metric-uptime').textContent = formatTime(localUptimeBase);
+        }
+
+        if (!uptimeTimer) {
+            uptimeTimer = setInterval(() => {
+                localUptimeBase += 1;
+                renderUptime();
+            }, 1000);
+        }
+
+        function renderWorkers(workers) {
+            const grid = document.getElementById('worker-grid');
+            const empty = document.getElementById('empty-state');
+            const workerIds = Object.keys(workers || {}).sort((a, b) => parseInt(a) - parseInt(b));
+
+            document.getElementById('worker-count-badge').textContent = `${workerIds.length} Worker`;
+
+            if (workerIds.length === 0) {
+                if (empty) empty.style.display = 'block';
+                return;
+            }
+            if (empty) empty.style.display = 'none';
+
+            workerIds.forEach(id => {
+                const w = workers[id];
+                let card = document.getElementById(`worker-card-${id}`);
+
+                if (!card) {
+                    card = document.createElement('div');
+                    card.id = `worker-card-${id}`;
+                    card.className = 'worker-card';
+                    card.innerHTML = `
+                        <div class="worker-card-header">
+                            <div class="worker-id-group">
+                                <span class="worker-badge">#${String(id).padStart(2, '0')}</span>
+                                <span class="worker-pid" id="pid-${id}">PID: ${w.pid || '-'}</span>
+                            </div>
+                            <span class="status-pill ${w.status_color || 'blue'}" id="status-${id}">
+                                ${w.status || 'SIAP'}
+                            </span>
+                        </div>
+                        <div class="video-box">
+                            <div class="video-box-header">
+                                <svg viewBox="0 0 24 24"><path d="M10 15l5.19-3L10 9v6m11.56-7.83c.13.47.22 1.1.28 1.9.07.8.1 1.49.1 2.09L22 12c0 2.19-.16 3.8-.44 4.83-.25.9-.83 1.48-1.73 1.73-.47.13-1.33.22-2.65.28-1.3.07-2.49.1-3.59.1L12 22c-4.19 0-6.8-.16-7.83-.44-.9-.25-1.48-.83-1.73-1.73-.13-.47-.22-1.1-.28-1.9-.07-.8-.1-1.49-.1-2.09L2 12c0-2.19.16-3.8.44-4.83.25-.9.83-1.48 1.73-1.73.47-.13 1.33-.22 2.65-.28 1.3-.07 2.49-.1 3.59-.1L12 2c4.19 0 6.8.16 7.83.44.9.25 1.48.83 1.73 1.73z"/></svg>
+                                <span>Sedang Diputar</span>
+                            </div>
+                            <div class="video-title" id="title-${id}">${w.video_title || 'Belum memilih video...'}</div>
+                            <div class="worker-details" id="details-${id}">${w.details || '-'}</div>
+                        </div>
+                        <div class="progress-section">
+                            <div class="progress-labels">
+                                <span class="progress-timer" id="timer-${id}">00:00 / 00:00</span>
+                                <span class="progress-pct" id="pct-${id}">0.0%</span>
+                            </div>
+                            <div class="progress-bar-track">
+                                <div class="progress-bar-fill" id="bar-${id}"></div>
+                            </div>
+                        </div>
+                        <div class="worker-card-footer">
+                            <div class="proxy-pill" id="proxy-${id}" title="${w.proxy || 'Direct'}">
+                                <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+                                <span>${w.proxy || 'Direct'}</span>
+                            </div>
+                            <div class="ads-badge" id="ads-${id}">
+                                ⚡ ${w.ads_skipped || 0} Ads
+                            </div>
+                        </div>
+                    `;
+                    grid.appendChild(card);
+                }
+
+                // Smooth update fields
+                const pidEl = document.getElementById(`pid-${id}`);
+                if (pidEl && w.pid) pidEl.textContent = `PID: ${w.pid}`;
+
+                const statusEl = document.getElementById(`status-${id}`);
+                if (statusEl) {
+                    statusEl.textContent = w.status || 'SIAP';
+                    statusEl.className = `status-pill ${w.status_color || 'blue'}`;
+                }
+
+                const titleEl = document.getElementById(`title-${id}`);
+                if (titleEl && w.video_title) titleEl.textContent = w.video_title;
+
+                const detailsEl = document.getElementById(`details-${id}`);
+                if (detailsEl) detailsEl.textContent = w.details || '-';
+
+                const timerEl = document.getElementById(`timer-${id}`);
+                if (timerEl) {
+                    const elapsedStr = formatTime(w.elapsed_sec || 0);
+                    const durStr = formatTime(w.duration_sec || 0);
+                    timerEl.textContent = `${elapsedStr} / ${durStr}`;
+                }
+
+                const pctEl = document.getElementById(`pct-${id}`);
+                const barEl = document.getElementById(`bar-${id}`);
+                const pctVal = Math.min(100.0, Math.max(0.0, w.percent || 0.0));
+                if (pctEl) pctEl.textContent = `${pctVal.toFixed(1)}%`;
+                if (barEl) barEl.style.width = `${pctVal}%`;
+
+                const proxyEl = document.getElementById(`proxy-${id}`);
+                if (proxyEl && w.proxy) {
+                    proxyEl.title = w.proxy;
+                    proxyEl.querySelector('span').textContent = w.proxy;
+                }
+
+                const adsEl = document.getElementById(`ads-${id}`);
+                if (adsEl) adsEl.textContent = `⚡ ${w.ads_skipped || 0} Ads`;
+            });
+        }
+
+        function setConnectionState(isLive) {
+            const badge = document.getElementById('live-indicator');
+            const txt = document.getElementById('live-text');
+            if (isLive) {
+                badge.className = 'status-badge-live';
+                txt.textContent = 'Live Telemetry';
+            } else {
+                badge.className = 'status-badge-live reconnecting';
+                txt.textContent = 'Reconnecting...';
+            }
+        }
+
+        // 1. Initial snapshot fetch
+        fetch('/api/status')
+            .then(res => res.json())
+            .then(data => {
+                updateSummary(data.summary);
+                renderWorkers(data.workers);
+            })
+            .catch(() => setConnectionState(false));
+
+        // 2. SSE Live Connection
+        function connectSSE() {
+            const eventSource = new EventSource('/api/stream');
+
+            eventSource.onopen = () => {
+                setConnectionState(true);
+            };
+
+            eventSource.addEventListener('init', (e) => {
+                try {
+                    const data = JSON.parse(e.data);
+                    updateSummary(data.summary);
+                    renderWorkers(data.workers);
+                } catch (err) {}
+            });
+
+            eventSource.addEventListener('update', (e) => {
+                try {
+                    const data = JSON.parse(e.data);
+                    updateSummary(data.summary);
+                    renderWorkers(data.workers);
+                } catch (err) {}
+            });
+
+            eventSource.onerror = () => {
+                setConnectionState(false);
+                eventSource.close();
+                setTimeout(connectSSE, 2000);
+            };
+        }
+
+        connectSSE();
+    </script>
+</body>
+</html>

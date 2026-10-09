@@ -77,5 +77,11 @@ class TestWebDashboard(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"status": "ok"})
 
+    def test_index_page_serves_html(self):
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("AutoView", response.text)
+        self.assertIn("worker-grid", response.text)
+
 if __name__ == "__main__":
     unittest.main()
