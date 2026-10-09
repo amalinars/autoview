@@ -423,7 +423,15 @@ def launch_isolated_context(p, headless: bool, proxy_url: str | None, user_data_
         # ANTI-CDN BLOCK: Paksa TCP (Non-QUIC). Proxy HTTP/SOCKS tidak mendukung UDP/QUIC ke googlevideo.com
         "--disable-quic",
         "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
-        "--disable-features=IsolateOrigins,site-per-process"
+        # MEMORY & CPU OPTIMIZATIONS (Ultra Ringan untuk VPS)
+        "--js-flags=--max-old-space-size=128",
+        "--disable-gpu",
+        "--disable-software-rasterizer",
+        "--disk-cache-size=10485760",
+        "--media-cache-size=10485760",
+        "--disable-component-update",
+        "--disable-domain-reliability",
+        "--disable-features=AudioServiceOutOfProcess,IsolateOrigins,site-per-process,MediaRouter,Translate,OptimizationHints"
     ]
 
     if not headless:
@@ -1622,6 +1630,21 @@ def worker_process_main(worker_id: int, args, proxy_list: list, success_counter,
             context.add_init_script(generate_stealth_script(fp))
             page = context.pages[0] if context.pages else context.new_page()
 
+            # MEMORY OPTIMIZATION: Abort non-essential heavy fonts & external analytics
+            def _filter_routes(route):
+                req = route.request
+                if req.resource_type == "font":
+                    route.abort()
+                elif any(d in req.url for d in ["google-analytics.com", "googletagmanager.com", "doubleclick.net"]):
+                    route.abort()
+                else:
+                    route.continue_()
+
+            try:
+                page.route("**/*", _filter_routes)
+            except Exception:
+                pass
+
             try:
                 search_kw = getattr(args, "keyword", "horrornologi")
                 target_chan = getattr(args, "channel", "horrornologi")
@@ -1856,6 +1879,8 @@ def worker_process_main(worker_id: int, args, proxy_list: list, success_counter,
                 except Exception:
                     pass
                 shutil.rmtree(temp_profile_dir, ignore_errors=True)
+                import gc
+                gc.collect()
 
         sleep_sec = (args.sleep_between + random.randint(1, 2)) if session_success else 0.5
         send_telemetry(worker_id, "status_change", status="COOLDOWN", details=f"Jeda {sleep_sec:.1f}s...")
