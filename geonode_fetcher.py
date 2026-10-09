@@ -11,6 +11,7 @@ import os
 import sys
 import json
 import time
+import random
 import urllib.request
 import urllib.error
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -356,9 +357,71 @@ def fetch_proxyscrape_proxies(countries: list[str] | None = None, timeout: float
     urls, _ = fetch_proxyscrape_free_list(limit=250, countries=countries, timeout=timeout)
     return urls
 
+def fetch_proxifly_free_list(
+    limit: int = 500,
+    countries: list[str] | None = None,
+    protocols: list[str] | None = None,
+    timeout: float = 8.0
+) -> tuple[list[str], int]:
+    """
+    Fetch proxies from Proxifly official free-proxy-list (https://github.com/proxifly/free-proxy-list).
+    Updated every 5 minutes with 50,000+ proxies worldwide across HTTP, HTTPS, SOCKS4, SOCKS5.
+    Uses jsDelivr CDN with fallback to GitHub raw.
+    Returns (proxy_urls, total_found).
+    """
+    target_protocols = set(p.lower() for p in protocols) if protocols else {"http", "https", "socks4", "socks5"}
+    proxy_urls = []
+    seen = set()
+    dead_proxies = get_dead_proxies()
+    lines_collected = []
+
+    urls_to_try = []
+    if countries:
+        for cc in countries[:6]:
+            c_up = cc.upper()
+            urls_to_try.append(f"https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/countries/{c_up}/data.txt")
+            urls_to_try.append(f"https://raw.githubusercontent.com/proxifly/free-proxy-list@main/proxies/countries/{c_up}/data.txt")
+    else:
+        urls_to_try.append("https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/all/data.txt")
+        urls_to_try.append("https://raw.githubusercontent.com/proxifly/free-proxy-list@main/proxies/all/data.txt")
+
+    for u in urls_to_try:
+        try:
+            req = urllib.request.Request(u, headers={"User-Agent": USER_AGENT})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                text = resp.read().decode("utf-8", errors="ignore")
+                for line in text.splitlines():
+                    line = line.strip()
+                    if line and "://" in line:
+                        lines_collected.append(line)
+            if not countries and lines_collected:
+                break
+        except Exception:
+            continue
+
+    total_found = len(lines_collected)
+    if lines_collected:
+        random.shuffle(lines_collected)
+        for p_str in lines_collected:
+            proto = p_str.split("://")[0].lower()
+            if proto not in target_protocols:
+                continue
+            if p_str not in seen and p_str not in dead_proxies:
+                seen.add(p_str)
+                proxy_urls.append(p_str)
+                if len(proxy_urls) >= limit:
+                    break
+
+    return proxy_urls, total_found
+
+def fetch_proxifly_proxies(countries: list[str] | None = None, timeout: float = 8.0) -> list[str]:
+    """Secondary fallback proxy provider using Proxifly free proxy list."""
+    urls, _ = fetch_proxifly_free_list(limit=500, countries=countries, timeout=timeout)
+    return urls
+
 def fetch_backup_proxies_paginated(limit: int = 250, offset: int = 0, countries: list[str] | None = None) -> list[str]:
     """
-    Backup paginated proxies from ProxyScrape and high-speed GitHub SOCKS/HTTP mirrors.
+    Backup paginated proxies from ProxyScrape, Proxifly, and high-speed GitHub SOCKS/HTTP mirrors.
     Rotates through offset so duplicate proxies are avoided.
     """
     dead_proxies = get_dead_proxies()
@@ -375,6 +438,18 @@ def fetch_backup_proxies_paginated(limit: int = 250, offset: int = 0, countries:
                 results.append(p)
     except Exception:
         pass
+
+    # 2. Proxifly 50K+ pool
+    if len(results) < limit:
+        try:
+            pf_list = fetch_proxifly_proxies(countries=countries, timeout=6.0)
+            sliced_pf = pf_list[offset:offset + limit] if offset < len(pf_list) else pf_list[:limit]
+            for p in sliced_pf:
+                if p not in seen and p not in dead_proxies:
+                    seen.add(p)
+                    results.append(p)
+        except Exception:
+            pass
 
     # 2. SOCKS-List GitHub mirror jika masih butuh tambahan
     if len(results) < limit:
@@ -513,18 +588,19 @@ def get_and_verify_proxies(
     # Default: Global (Semua negara jika countries is None)
     c_str = (", ".join(countries[:6]) + ("..." if len(countries) > 6 else "")) if countries else "GLOBAL (Semua Negara / Worldwide)"
     print(f"\n{BOLD}{CYAN}==================================================================={RESET}")
-    print(f"{BOLD}    DUAL-SOURCE GLOBAL PROXY (GEONODE + PROXYSCRAPE ALL COUNTRIES)   {RESET}")
+    print(f"{BOLD}    TRIPLE-SOURCE GLOBAL PROXY (GEONODE + PROXYSCRAPE + PROXIFLY)  {RESET}")
     print(f"{BOLD}{CYAN}==================================================================={RESET}")
     print(f"{CYAN}[PAGINASI GEONODE]{RESET} Halaman {BOLD}{p_num}{RESET} (Rentang Items: {BOLD}{start_item} - {end_item}{RESET})")
     print(f"{CYAN}[KRITERIA]{RESET} Prioritas: {BOLD}{mode_desc}{RESET}")
     print(f"{CYAN}[CAKUPAN] {RESET} {c_str}")
 
-    # 1. Fetch simultan dari Geonode dan ProxyScrape Mirror (jsDelivr CDN)
-    print(f"{CYAN}[DUAL-FETCH]{RESET} Mengambil proxy secara simultan dari Geonode & ProxyScrape (Global)...")
+    # 1. Fetch simultan dari Geonode, ProxyScrape, dan Proxifly Mirror
+    print(f"{CYAN}[TRIPLE-FETCH]{RESET} Mengambil proxy secara simultan dari Geonode, ProxyScrape & Proxifly (Global)...")
     raw_geonode = []
     raw_proxyscrape = []
+    raw_proxifly = []
 
-    with ThreadPoolExecutor(max_workers=2) as ingest_pool:
+    with ThreadPoolExecutor(max_workers=3) as ingest_pool:
         fut_geonode = ingest_pool.submit(
             fetch_geonode_proxies,
             limit=limit,
@@ -535,7 +611,12 @@ def get_and_verify_proxies(
         )
         fut_ps = ingest_pool.submit(
             fetch_proxyscrape_free_list,
-            limit=max(limit * 3, 2000),
+            limit=max(limit * 2, 1500),
+            countries=countries
+        )
+        fut_pf = ingest_pool.submit(
+            fetch_proxifly_free_list,
+            limit=max(limit * 2, 1500),
             countries=countries
         )
         try:
@@ -550,13 +631,19 @@ def get_and_verify_proxies(
             print(f"{YELLOW}[WARN] Error fetch ProxyScrape: {e}{RESET}")
             raw_proxyscrape = []
 
-    print(f"{GREEN}[INGEST-OK]{RESET} Diperoleh: {BOLD}{len(raw_geonode)}{RESET} dari Geonode | {BOLD}{len(raw_proxyscrape)}{RESET} dari ProxyScrape")
+        try:
+            raw_proxifly, _ = fut_pf.result()
+        except Exception as e:
+            print(f"{YELLOW}[WARN] Error fetch Proxifly: {e}{RESET}")
+            raw_proxifly = []
 
-    # Interleave proxy baru dari kedua sumber agar terdistribusi merata
+    print(f"{GREEN}[INGEST-OK]{RESET} Diperoleh: {BOLD}{len(raw_geonode)}{RESET} dari Geonode | {BOLD}{len(raw_proxyscrape)}{RESET} dari ProxyScrape | {BOLD}{len(raw_proxifly)}{RESET} dari Proxifly")
+
+    # Interleave proxy baru dari ketiga sumber agar terdistribusi merata
     dead_proxies = get_dead_proxies()
     interleaved_new = []
     seen = set()
-    max_src_len = max(len(raw_geonode), len(raw_proxyscrape))
+    max_src_len = max(len(raw_geonode), len(raw_proxyscrape), len(raw_proxifly))
     for i in range(max_src_len):
         if i < len(raw_geonode):
             p = raw_geonode[i]
@@ -565,6 +652,11 @@ def get_and_verify_proxies(
                 interleaved_new.append(p)
         if i < len(raw_proxyscrape):
             p = raw_proxyscrape[i]
+            if p not in seen and p not in dead_proxies:
+                seen.add(p)
+                interleaved_new.append(p)
+        if i < len(raw_proxifly):
+            p = raw_proxifly[i]
             if p not in seen and p not in dead_proxies:
                 seen.add(p)
                 interleaved_new.append(p)
