@@ -817,6 +817,17 @@
         }
 
         connectSSE();
+
+        // 3. Dual-Sync: Fallback periodic polling every 1.5s to ensure continuous real-time sync
+        setInterval(() => {
+            fetch('/api/status')
+                .then(res => res.json())
+                .then(data => {
+                    updateSummary(data.summary);
+                    renderWorkers(data.workers);
+                })
+                .catch(() => {});
+        }, 1500);
     </script>
 </body>
 </html>

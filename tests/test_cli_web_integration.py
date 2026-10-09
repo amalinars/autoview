@@ -22,6 +22,17 @@ class TestCLIWebIntegration(unittest.TestCase):
         self.assertIn(1, snap["workers"])
         self.assertEqual(snap["workers"][1]["pid"], 9999)
 
+        # Verify Live SSE Stream
+        import urllib.request
+        req = urllib.request.Request("http://127.0.0.1:5099/api/stream")
+        with urllib.request.urlopen(req, timeout=3.0) as resp:
+            self.assertEqual(resp.status, 200)
+            self.assertIn("text/event-stream", resp.headers.get("content-type"))
+            line1 = resp.readline().decode()
+            line2 = resp.readline().decode()
+            self.assertIn("event: init", line1)
+            self.assertIn("integration test", line2)
+
         # Send shutdown event
         q.put({"event": "SHUTDOWN"})
 

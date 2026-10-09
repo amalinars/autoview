@@ -6,7 +6,7 @@ import asyncio
 import threading
 from typing import Dict, Any, Optional
 from starlette.applications import Starlette
-from starlette.responses import JSONResponse, HTMLResponse, Response
+from starlette.responses import JSONResponse, HTMLResponse, StreamingResponse
 from starlette.routing import Route
 import uvicorn
 
@@ -135,10 +135,21 @@ class DashboardStateManager:
                     w["percent"] = 0.0
 
                 elif event == "watch_progress":
-                    w["elapsed_sec"] = float(data.get("elapsed", 0.0))
-                    w["duration_sec"] = float(data.get("duration", 0.0))
-                    w["percent"] = round(float(data.get("percent", 0.0)), 1)
+                    elapsed_sec = float(data.get("elapsed", 0.0))
+                    target_sec = float(data.get("target", 0.0)) or float(data.get("duration", 0.0))
+                    w["elapsed_sec"] = elapsed_sec
+                    w["duration_sec"] = target_sec
+                    if target_sec > 0:
+                        w["percent"] = round(min(100.0, (elapsed_sec / target_sec) * 100.0), 1)
+                    else:
+                        w["percent"] = round(float(data.get("percent", 0.0)), 1)
+                    w["status"] = data.get("status", "MENONTON")
+                    w["status_color"] = "green"
                     w["details"] = data.get("details", "")
+                    if "skippable_ads" in data:
+                        w["ads_skipped"] = int(data.get("skippable_ads", 0))
+                        total_ads = sum(wk["ads_skipped"] for wk in self.workers.values())
+                        self.summary["total_ads_skipped"] = total_ads
 
                 elif event == "ad_status":
                     w["ads_skipped"] = int(data.get("skippable", 0))
@@ -167,6 +178,8 @@ def create_app(state_manager: DashboardStateManager, static_html_path: Optional[
         return HTMLResponse("<h1>AutoView Dashboard</h1><p>Frontend template not found.</p>")
 
     async def get_status(request):
+        loop = asyncio.get_running_loop()
+        state_manager.set_loop(loop)
         return JSONResponse(state_manager.get_snapshot())
 
     async def health(request):
@@ -183,16 +196,20 @@ def create_app(state_manager: DashboardStateManager, static_html_path: Optional[
                 init_msg = f"event: init\ndata: {json.dumps(state_manager.get_snapshot())}\n\n"
                 yield init_msg.encode("utf-8")
                 while True:
+                    if await request.is_disconnected():
+                        break
                     try:
-                        msg = await asyncio.wait_for(q.get(), timeout=15.0)
+                        msg = await asyncio.wait_for(q.get(), timeout=2.0)
                         yield msg.encode("utf-8")
                     except asyncio.TimeoutError:
                         # Heartbeat ping
                         yield b": ping\n\n"
+            except asyncio.CancelledError:
+                pass
             finally:
                 state_manager.unsubscribe(q)
 
-        return Response(
+        return StreamingResponse(
             event_generator(),
             media_type="text/event-stream",
             headers={
