@@ -1999,8 +1999,8 @@ def main():
     parser.add_argument(
         "--web-host",
         type=str,
-        default="127.0.0.1",
-        help="Host untuk Web Dashboard (default: 127.0.0.1)"
+        default="0.0.0.0",
+        help="Host untuk Web Dashboard (default: 0.0.0.0)"
     )
 
     args = parser.parse_args()

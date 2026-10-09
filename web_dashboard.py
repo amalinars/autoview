@@ -227,7 +227,7 @@ def create_app(state_manager: DashboardStateManager, static_html_path: Optional[
     ]
     return Starlette(routes=routes)
 
-def start_web_dashboard(telemetry_queue, host: str = "127.0.0.1", port: int = 5000, initial_config: Optional[Dict[str, Any]] = None) -> tuple[DashboardStateManager, threading.Thread]:
+def start_web_dashboard(telemetry_queue, host: str = "0.0.0.0", port: int = 5000, initial_config: Optional[Dict[str, Any]] = None) -> tuple[DashboardStateManager, threading.Thread]:
     state_manager = DashboardStateManager(initial_config)
 
     def queue_listener():
