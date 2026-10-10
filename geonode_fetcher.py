@@ -41,6 +41,30 @@ SORT_MODES = [
     ("upTime", "desc", "Paling Stabil (Highest Uptime)")
 ]
 
+def circular_slice(items: list, offset: int, limit: int) -> tuple[list, int, bool]:
+    """
+    Slices `items` circularly starting from `offset` up to `limit`.
+    If offset + limit exceeds len(items), wraps around to the beginning (0).
+    Returns (sliced_items, next_offset, wrapped_around_bool).
+    """
+    if not items:
+        return [], 0, False
+
+    n = len(items)
+    effective_offset = offset % n
+    wrapped = (offset >= n) or ((effective_offset + limit) >= n)
+
+    if effective_offset + limit <= n:
+        slice_result = items[effective_offset : effective_offset + limit]
+    else:
+        first_part = items[effective_offset:]
+        needed = limit - len(first_part)
+        second_part = items[:min(needed, n)]
+        slice_result = first_part + second_part
+
+    next_offset = (effective_offset + limit) % n
+    return slice_result, next_offset, wrapped
+
 def load_pagination_state() -> dict:
     default_state = {
         "page": 1,
@@ -48,7 +72,10 @@ def load_pagination_state() -> dict:
         "per_page": 250,
         "total_available": 1200,
         "geonode_cooldown_until": 0,
-        "last_fetch_time": 0
+        "last_fetch_time": 0,
+        "proxyscrape_offset": 0,
+        "proxifly_offset": 0,
+        "thespeedx_offset": 0
     }
     if os.path.exists(PAGINATION_STATE_FILE):
         try:
@@ -72,13 +99,7 @@ def get_next_pagination_slice(per_page: int = 250) -> tuple[int, str, str, str, 
     """
     Returns (page, sort_by, sort_type, mode_desc, start_item, end_item)
     and rotates to the next page for subsequent calls.
-    Example:
-    - Call 1: Page 1 (Items 1 - 250) | Mode: Terbaru
-    - Call 2: Page 2 (Items 251 - 500) | Mode: Terbaru
-    - Call 3: Page 3 (Items 501 - 750) | Mode: Terbaru
-    - Call 4: Page 4 (Items 751 - 1000) | Mode: Terbaru
-    - Call 5: Page 5 (Items 1001 - 1200) | Mode: Terbaru
-    - Call 6: Page 1 (Items 1 - 250) | Mode: Tercepat (rotasi kriteria baru)
+    Wraps back to page 1 automatically when total pages are exhausted.
     """
     state = load_pagination_state()
     page = state.get("page", 1)
@@ -87,6 +108,7 @@ def get_next_pagination_slice(per_page: int = 250) -> tuple[int, str, str, str, 
 
     max_pages = max(1, (total + per_page - 1) // per_page)
     if page > max_pages:
+        print(f"{CYAN}[PAGINASI-ROTASI]{RESET} Geonode: Halaman {page} melebihi batas {max_pages}. Berputar kembali ke Halaman 1...")
         page = 1
         mode_idx = (mode_idx + 1) % len(SORT_MODES)
 
@@ -256,7 +278,10 @@ def reset_proxy_storage(
                 "per_page": 250,
                 "total_available": 1200,
                 "geonode_cooldown_until": 0,
-                "last_fetch_time": 0
+                "last_fetch_time": 0,
+                "proxyscrape_offset": 0,
+                "proxifly_offset": 0,
+                "thespeedx_offset": 0
             }
             save_pagination_state(default_state)
         except Exception:
@@ -267,6 +292,7 @@ def reset_proxy_storage(
 
 def fetch_proxyscrape_free_list(
     limit: int = 300,
+    offset: int | None = None,
     countries: list[str] | None = None,
     protocols: list[str] | None = None,
     timeout: float = 8.0
@@ -274,7 +300,7 @@ def fetch_proxyscrape_free_list(
     """
     Fetch proxies from ProxyScrape official free-proxy-list GitHub mirror (via jsDelivr CDN).
     Falls back to ProxyScrape v4 Live API if CDN is unavailable.
-    If countries is None, fetches all countries worldwide without filtering.
+    Supports smart circular pagination: loops back to beginning when pool is exhausted.
     Returns (proxy_urls, total_found).
     """
     target_countries = {c.upper() for c in countries} if countries else None
@@ -313,18 +339,43 @@ def fetch_proxyscrape_free_list(
                     -float(x.get("uptime_percent") or 0.0)
                 ))
 
-                for item in candidates:
-                    proto = (item.get("protocol") or "http").lower()
-                    ip = item.get("ip")
-                    port = item.get("port")
-                    p_str = f"{proto}://{ip}:{port}"
-                    if p_str not in seen and p_str not in dead_proxies:
-                        seen.add(p_str)
-                        proxy_urls.append(p_str)
-                        if len(proxy_urls) >= limit:
-                            break
-                return proxy_urls, total_found
-    except Exception as e:
+                if candidates:
+                    state = load_pagination_state()
+                    use_persistent = (offset is None)
+                    curr_offset = state.get("proxyscrape_offset", 0) if use_persistent else offset
+
+                    sliced_candidates, next_offset, wrapped = circular_slice(candidates, curr_offset, max(limit * 2, 500))
+                    if wrapped and curr_offset > 0:
+                        print(f"{CYAN}[PAGINASI-ROTASI]{RESET} ProxyScrape: Akhir daftar tercapai ({len(candidates)} proxy). Berputar kembali ke awal (Halaman 1 / Offset 0)...")
+
+                    if use_persistent:
+                        state["proxyscrape_offset"] = next_offset
+                        save_pagination_state(state)
+
+                    for item in sliced_candidates:
+                        proto = (item.get("protocol") or "http").lower()
+                        ip = item.get("ip")
+                        port = item.get("port")
+                        p_str = f"{proto}://{ip}:{port}"
+                        if p_str not in seen and p_str not in dead_proxies:
+                            seen.add(p_str)
+                            proxy_urls.append(p_str)
+                            if len(proxy_urls) >= limit:
+                                break
+
+                    if len(proxy_urls) < limit:
+                        for item in candidates:
+                            proto = (item.get("protocol") or "http").lower()
+                            ip = item.get("ip")
+                            port = item.get("port")
+                            p_str = f"{proto}://{ip}:{port}"
+                            if p_str not in seen and p_str not in dead_proxies:
+                                seen.add(p_str)
+                                proxy_urls.append(p_str)
+                                if len(proxy_urls) >= limit:
+                                    break
+                    return proxy_urls, total_found
+    except Exception:
         pass
 
     # 2. Secondary Fallback: ProxyScrape v4 Live Public API
@@ -336,29 +387,44 @@ def fetch_proxyscrape_free_list(
         req = urllib.request.Request(api_url, headers={"User-Agent": USER_AGENT})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             text = resp.read().decode("utf-8", errors="ignore")
+            api_candidates = []
             for line in text.splitlines():
                 line = line.strip()
                 if line and ":" in line:
                     p_str = line if line.startswith(("http://", "https://", "socks4://", "socks5://")) else f"http://{line}"
+                    api_candidates.append(p_str)
+            if api_candidates:
+                total_found = len(api_candidates)
+                state = load_pagination_state()
+                use_persistent = (offset is None)
+                curr_offset = state.get("proxyscrape_offset", 0) if use_persistent else offset
+                sliced_api, next_offset, wrapped = circular_slice(api_candidates, curr_offset, max(limit * 2, 500))
+                if wrapped and curr_offset > 0:
+                    print(f"{CYAN}[PAGINASI-ROTASI]{RESET} ProxyScrape API: Akhir daftar tercapai ({len(api_candidates)} proxy). Berputar kembali ke awal...")
+                if use_persistent:
+                    state["proxyscrape_offset"] = next_offset
+                    save_pagination_state(state)
+                for p_str in sliced_api:
                     if p_str not in seen and p_str not in dead_proxies:
                         seen.add(p_str)
                         proxy_urls.append(p_str)
                         if len(proxy_urls) >= limit:
                             break
-            return proxy_urls, len(proxy_urls)
+                return proxy_urls, total_found
     except Exception:
         pass
 
     return proxy_urls, total_found
 
 
-def fetch_proxyscrape_proxies(countries: list[str] | None = None, timeout: float = 8.0) -> list[str]:
+def fetch_proxyscrape_proxies(countries: list[str] | None = None, timeout: float = 8.0, offset: int | None = None) -> list[str]:
     """Secondary fallback proxy provider using ProxyScrape free API/CDN."""
-    urls, _ = fetch_proxyscrape_free_list(limit=250, countries=countries, timeout=timeout)
+    urls, _ = fetch_proxyscrape_free_list(limit=250, offset=offset, countries=countries, timeout=timeout)
     return urls
 
 def fetch_proxifly_free_list(
     limit: int = 500,
+    offset: int | None = None,
     countries: list[str] | None = None,
     protocols: list[str] | None = None,
     timeout: float = 8.0
@@ -366,7 +432,7 @@ def fetch_proxifly_free_list(
     """
     Fetch proxies from Proxifly official free-proxy-list (https://github.com/proxifly/free-proxy-list).
     Updated every 5 minutes with 50,000+ proxies worldwide across HTTP, HTTPS, SOCKS4, SOCKS5.
-    Uses jsDelivr CDN with fallback to GitHub raw.
+    Uses circular pagination: loops back to beginning when pool is exhausted.
     Returns (proxy_urls, total_found).
     """
     target_protocols = set(p.lower() for p in protocols) if protocols else {"http", "https", "socks4", "socks5"}
@@ -401,8 +467,19 @@ def fetch_proxifly_free_list(
 
     total_found = len(lines_collected)
     if lines_collected:
-        random.shuffle(lines_collected)
-        for p_str in lines_collected:
+        state = load_pagination_state()
+        use_persistent = (offset is None)
+        curr_offset = state.get("proxifly_offset", 0) if use_persistent else offset
+
+        sliced_lines, next_offset, wrapped = circular_slice(lines_collected, curr_offset, max(limit * 2, 800))
+        if wrapped and curr_offset > 0:
+            print(f"{CYAN}[PAGINASI-ROTASI]{RESET} Proxifly: Akhir daftar tercapai ({len(lines_collected)} proxy). Berputar kembali ke awal (Halaman 1 / Offset 0)...")
+
+        if use_persistent:
+            state["proxifly_offset"] = next_offset
+            save_pagination_state(state)
+
+        for p_str in sliced_lines:
             proto = p_str.split("://")[0].lower()
             if proto not in target_protocols:
                 continue
@@ -412,15 +489,27 @@ def fetch_proxifly_free_list(
                 if len(proxy_urls) >= limit:
                     break
 
+        if len(proxy_urls) < limit:
+            for p_str in lines_collected:
+                proto = p_str.split("://")[0].lower()
+                if proto not in target_protocols:
+                    continue
+                if p_str not in seen and p_str not in dead_proxies:
+                    seen.add(p_str)
+                    proxy_urls.append(p_str)
+                    if len(proxy_urls) >= limit:
+                        break
+
     return proxy_urls, total_found
 
-def fetch_proxifly_proxies(countries: list[str] | None = None, timeout: float = 8.0) -> list[str]:
+def fetch_proxifly_proxies(countries: list[str] | None = None, timeout: float = 8.0, offset: int | None = None) -> list[str]:
     """Secondary fallback proxy provider using Proxifly free proxy list."""
-    urls, _ = fetch_proxifly_free_list(limit=500, countries=countries, timeout=timeout)
+    urls, _ = fetch_proxifly_free_list(limit=500, offset=offset, countries=countries, timeout=timeout)
     return urls
 
 def fetch_thespeedx_free_list(
     limit: int = 500,
+    offset: int | None = None,
     protocols: list[str] | None = None,
     timeout: float = 6.0
 ) -> tuple[list[str], int]:
@@ -428,7 +517,7 @@ def fetch_thespeedx_free_list(
     Fetch high-speed proxies from TheSpeedX official SOCKS-List repository
     (https://github.com/TheSpeedX/SOCKS-List).
     Supported protocols: socks5, socks4, http.
-    Uses jsDelivr CDN with GitHub raw fallback.
+    Uses circular pagination: loops back to beginning when pool is exhausted.
     Returns (proxy_urls, total_found).
     """
     target_protocols = set(p.lower() for p in protocols) if protocols else {"http", "socks4", "socks5"}
@@ -486,25 +575,44 @@ def fetch_thespeedx_free_list(
 
     total_found = len(all_candidates)
     if all_candidates:
-        random.shuffle(all_candidates)
-        for p in all_candidates:
+        state = load_pagination_state()
+        use_persistent = (offset is None)
+        curr_offset = state.get("thespeedx_offset", 0) if use_persistent else offset
+
+        sliced_candidates, next_offset, wrapped = circular_slice(all_candidates, curr_offset, max(limit * 2, 800))
+        if wrapped and curr_offset > 0:
+            print(f"{CYAN}[PAGINASI-ROTASI]{RESET} TheSpeedX: Akhir daftar tercapai ({len(all_candidates)} proxy). Berputar kembali ke awal (Halaman 1 / Offset 0)...")
+
+        if use_persistent:
+            state["thespeedx_offset"] = next_offset
+            save_pagination_state(state)
+
+        for p in sliced_candidates:
             if p not in seen and p not in dead_proxies:
                 seen.add(p)
                 proxy_urls.append(p)
                 if len(proxy_urls) >= limit:
                     break
 
+        if len(proxy_urls) < limit:
+            for p in all_candidates:
+                if p not in seen and p not in dead_proxies:
+                    seen.add(p)
+                    proxy_urls.append(p)
+                    if len(proxy_urls) >= limit:
+                        break
+
     return proxy_urls, total_found
 
-def fetch_thespeedx_proxies(limit: int = 500, protocols: list[str] | None = None, timeout: float = 6.0) -> list[str]:
+def fetch_thespeedx_proxies(limit: int = 500, offset: int | None = None, protocols: list[str] | None = None, timeout: float = 6.0) -> list[str]:
     """Helper returning list of TheSpeedX proxies."""
-    urls, _ = fetch_thespeedx_free_list(limit=limit, protocols=protocols, timeout=timeout)
+    urls, _ = fetch_thespeedx_free_list(limit=limit, offset=offset, protocols=protocols, timeout=timeout)
     return urls
 
 def fetch_backup_proxies_paginated(limit: int = 250, offset: int = 0, countries: list[str] | None = None) -> list[str]:
     """
     Backup paginated proxies from ProxyScrape, Proxifly, TheSpeedX, and high-speed GitHub SOCKS/HTTP mirrors.
-    Rotates through offset so duplicate proxies are avoided.
+    Rotates through offset circularly so duplicate proxies are avoided and loops back to start when exhausted.
     """
     dead_proxies = get_dead_proxies()
     results = []
@@ -512,36 +620,39 @@ def fetch_backup_proxies_paginated(limit: int = 250, offset: int = 0, countries:
 
     # 1. ProxyScrape High-CPM
     try:
-        ps_list = fetch_proxyscrape_proxies(countries=countries, timeout=6.0)
-        sliced_ps = ps_list[offset:offset + limit] if offset < len(ps_list) else ps_list[:limit]
-        for p in sliced_ps:
-            if p not in seen and p not in dead_proxies:
-                seen.add(p)
-                results.append(p)
+        ps_list = fetch_proxyscrape_proxies(countries=countries, timeout=6.0, offset=offset)
+        if ps_list:
+            sliced_ps, _, _ = circular_slice(ps_list, offset, limit)
+            for p in sliced_ps:
+                if p not in seen and p not in dead_proxies:
+                    seen.add(p)
+                    results.append(p)
     except Exception:
         pass
 
     # 2. Proxifly 50K+ pool
     if len(results) < limit:
         try:
-            pf_list = fetch_proxifly_proxies(countries=countries, timeout=6.0)
-            sliced_pf = pf_list[offset:offset + limit] if offset < len(pf_list) else pf_list[:limit]
-            for p in sliced_pf:
-                if p not in seen and p not in dead_proxies:
-                    seen.add(p)
-                    results.append(p)
+            pf_list = fetch_proxifly_proxies(countries=countries, timeout=6.0, offset=offset)
+            if pf_list:
+                sliced_pf, _, _ = circular_slice(pf_list, offset, limit)
+                for p in sliced_pf:
+                    if p not in seen and p not in dead_proxies:
+                        seen.add(p)
+                        results.append(p)
         except Exception:
             pass
 
     # 3. TheSpeedX SOCKS-List (SOCKS5, SOCKS4, HTTP)
     if len(results) < limit:
         try:
-            speedx_list = fetch_thespeedx_proxies(limit=limit * 2, timeout=6.0)
-            sliced_sx = speedx_list[offset:offset + limit] if offset < len(speedx_list) else speedx_list[:limit]
-            for p in sliced_sx:
-                if p not in seen and p not in dead_proxies:
-                    seen.add(p)
-                    results.append(p)
+            speedx_list = fetch_thespeedx_proxies(limit=limit * 2, offset=offset, timeout=6.0)
+            if speedx_list:
+                sliced_sx, _, _ = circular_slice(speedx_list, offset, limit)
+                for p in sliced_sx:
+                    if p not in seen and p not in dead_proxies:
+                        seen.add(p)
+                        results.append(p)
         except Exception:
             pass
 
@@ -603,6 +714,22 @@ def fetch_geonode_proxies(
                 if p_str not in seen and p_str not in dead_proxies:
                     seen.add(p_str)
                     proxy_urls.append(p_str)
+
+            # Jika page > 1 tapi items kosong (artinya halaman sudah habis), putar kembali ke Halaman 1
+            if len(items) == 0 and page > 1:
+                print(f"{CYAN}[PAGINASI-ROTASI]{RESET} Geonode: Halaman {page} kosong (mencapai akhir data). Berputar kembali ke Halaman 1...")
+                state["page"] = 1
+                state["mode_index"] = (state.get("mode_index", 0) + 1) % len(SORT_MODES)
+                save_pagination_state(state)
+                s_by, s_type, _ = SORT_MODES[state["mode_index"]]
+                return fetch_geonode_proxies(
+                    limit=limit,
+                    page=1,
+                    sort_by=s_by,
+                    sort_type=s_type,
+                    countries=countries,
+                    timeout=timeout
+                )
     except urllib.error.HTTPError as e:
         if e.code == 429:
             retry_after = 600
@@ -615,6 +742,20 @@ def fetch_geonode_proxies(
             state["geonode_cooldown_until"] = time.time() + retry_after
             save_pagination_state(state)
             print(f"{YELLOW}[RATE-LIMIT GEONODE (429)]{RESET} Kuota 100 req/jam tercapai. Beralih ke High-CPM Mirror (cooldown {retry_after}s)...")
+        elif e.code in (400, 404, 422) and page > 1:
+            print(f"{CYAN}[PAGINASI-ROTASI]{RESET} Geonode: Halaman {page} di luar rentang API (HTTP {e.code}). Berputar kembali ke Halaman 1...")
+            state["page"] = 1
+            state["mode_index"] = (state.get("mode_index", 0) + 1) % len(SORT_MODES)
+            save_pagination_state(state)
+            s_by, s_type, _ = SORT_MODES[state["mode_index"]]
+            return fetch_geonode_proxies(
+                limit=limit,
+                page=1,
+                sort_by=s_by,
+                sort_type=s_type,
+                countries=countries,
+                timeout=timeout
+            )
         else:
             print(f"{YELLOW}[WARN] Gagal mengambil proxy Geonode (Hal {page}): HTTP {e.code}{RESET}")
     except Exception as e:
