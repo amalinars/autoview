@@ -52,7 +52,7 @@ class TestCircularPagination(unittest.TestCase):
 
     def test_all_provider_offsets_in_state(self):
         state = load_pagination_state()
-        for key in ["page", "proxyscrape_offset", "proxifly_offset", "thespeedx_offset", "iplocate_offset"]:
+        for key in ["page", "proxyscrape_offset", "proxifly_offset", "thespeedx_offset", "iplocate_offset", "databay_offset"]:
             self.assertIn(key, state)
             self.assertIsInstance(state[key], int)
 

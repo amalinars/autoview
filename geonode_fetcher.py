@@ -12,6 +12,7 @@ import sys
 import json
 import time
 import random
+import re
 import urllib.request
 import urllib.error
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -76,7 +77,8 @@ def load_pagination_state() -> dict:
         "proxyscrape_offset": 0,
         "proxifly_offset": 0,
         "thespeedx_offset": 0,
-        "iplocate_offset": 0
+        "iplocate_offset": 0,
+        "databay_offset": 0
     }
     if os.path.exists(PAGINATION_STATE_FILE):
         try:
@@ -283,7 +285,8 @@ def reset_proxy_storage(
                 "proxyscrape_offset": 0,
                 "proxifly_offset": 0,
                 "thespeedx_offset": 0,
-                "iplocate_offset": 0
+                "iplocate_offset": 0,
+                "databay_offset": 0
             }
             save_pagination_state(default_state)
         except Exception:
@@ -758,9 +761,178 @@ def fetch_iplocate_proxies(
     urls, _ = fetch_iplocate_free_list(limit=limit, offset=offset, countries=countries, protocols=protocols, timeout=timeout)
     return urls
 
+DATABAY_COOKIES_FILES = [
+    os.path.join(BASE_DIR, "databay_cookies.txt"),
+    os.path.join(BASE_DIR, "cookies.txt"),
+    os.path.join(BASE_DIR, ".databay_cookies"),
+]
+
+def load_databay_cookie_header() -> str | None:
+    """Read session cookie from environment or local cookies.txt file for Databay API."""
+    env_cookie = os.environ.get("DATABAY_COOKIE")
+    if env_cookie:
+        return env_cookie.strip()
+    for fpath in DATABAY_COOKIES_FILES:
+        if os.path.exists(fpath):
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+                cookie_pairs = []
+                for line in lines:
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    parts = line.split("\t")
+                    if len(parts) >= 7:
+                        name, val = parts[5], parts[6]
+                        cookie_pairs.append(f"{name}={val}")
+                    elif "=" in line:
+                        cookie_pairs.append(line)
+                if cookie_pairs:
+                    return "; ".join(cookie_pairs)
+            except Exception:
+                pass
+    return None
+
+def fetch_databay_free_list(
+    limit: int = 500,
+    offset: int | None = None,
+    countries: list[str] | None = None,
+    protocols: list[str] | None = None,
+    timeout: float = 8.0
+) -> tuple[list[str], int]:
+    """
+    Fetch live verified proxies from Databay (https://databay.com/free-proxy-list).
+    Supports authenticated API (https://databay.com/api/v1/proxy-list) when cookies.txt or
+    DATABAY_COOKIE is present, and seamlessly falls back to scraping Databay's live public
+    proxy directory (SOCKS5, SOCKS4, HTTP, HTTPS, and country lists) without authentication.
+    Uses circular pagination: loops back to beginning when pool is exhausted.
+    Returns (proxy_urls, total_found).
+    """
+    target_protocols = set(p.lower() for p in protocols) if protocols else {"http", "https", "socks4", "socks5"}
+    dead_proxies = get_dead_proxies()
+    proxy_urls = []
+    seen = set()
+    lines_collected = []
+
+    # 1. Attempt official API if cookie jar is present
+    cookie_hdr = load_databay_cookie_header()
+    if cookie_hdr:
+        try:
+            proto_q = f"&protocol={','.join(target_protocols)}" if protocols else ""
+            country_q = f"&country={countries[0].upper()}" if countries else ""
+            api_url = f"https://databay.com/api/v1/proxy-list?format=json&limit=1000{proto_q}{country_q}"
+            req = urllib.request.Request(
+                api_url,
+                headers={
+                    "User-Agent": USER_AGENT,
+                    "Cookie": cookie_hdr,
+                    "Accept": "application/json"
+                }
+            )
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                items = data if isinstance(data, list) else (data.get("data") or data.get("proxies") or [])
+                for item in items:
+                    if isinstance(item, dict):
+                        ip = item.get("ip") or item.get("host")
+                        port = item.get("port")
+                        proto = (item.get("protocol") or "http").lower()
+                        if ip and port:
+                            lines_collected.append(f"{proto}://{ip}:{port}")
+                    elif isinstance(item, str) and ":" in item:
+                        lines_collected.append(item if "://" in item else f"http://{item}")
+        except Exception:
+            pass
+
+    # 2. Public HTML Directory Scraper (Zero Auth required, always works)
+    if not lines_collected:
+        urls_to_scrape = [
+            "https://databay.com/free-proxy-list",
+            "https://databay.com/free-proxy-list/socks5",
+            "https://databay.com/free-proxy-list/socks4",
+            "https://databay.com/free-proxy-list/http",
+            "https://databay.com/free-proxy-list/https",
+        ]
+        if countries:
+            for cc in countries[:4]:
+                c_clean = cc.lower()
+                urls_to_scrape.insert(0, f"https://databay.com/free-proxy-list/{c_clean}")
+                if c_clean == "us":
+                    urls_to_scrape.insert(0, "https://databay.com/free-proxy-list/united-states-of-america")
+
+        for u in urls_to_scrape:
+            try:
+                req = urllib.request.Request(u, headers={"User-Agent": USER_AGENT})
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    html = resp.read().decode("utf-8", errors="ignore")
+                    rows = re.findall(r'<tr[^>]*>(.*?)</tr>', html, re.DOTALL)
+                    for r in rows:
+                        m_endpoint = re.search(r'data-proxy-text=\"\">([0-9\.]+:[0-9]+)<', r)
+                        m_proto = re.search(r'proxy-table-module__[^\"]*__protocol[^>]*>([a-zA-Z0-9]+)<', r)
+                        if m_endpoint:
+                            endpoint = m_endpoint.group(1).strip()
+                            proto = m_proto.group(1).strip().lower() if m_proto else 'http'
+                            if proto not in ('http', 'https', 'socks4', 'socks5'):
+                                proto = 'http'
+                            if proto in target_protocols:
+                                p_str = f"{proto}://{endpoint}"
+                                if p_str not in lines_collected:
+                                    lines_collected.append(p_str)
+            except Exception:
+                continue
+
+    total_found = len(lines_collected)
+    if lines_collected:
+        state = load_pagination_state()
+        use_persistent = (offset is None)
+        curr_offset = state.get("databay_offset", 0) if use_persistent else offset
+
+        sliced_lines, next_offset, wrapped = circular_slice(lines_collected, curr_offset, max(limit * 2, 500))
+        if wrapped and curr_offset > 0:
+            print(f"{CYAN}[PAGINASI-ROTASI]{RESET} Databay: Akhir daftar tercapai ({len(lines_collected)} proxy). Berputar kembali ke awal (Halaman 1 / Offset 0)...")
+
+        if use_persistent:
+            state["databay_offset"] = next_offset
+            save_pagination_state(state)
+
+        for p_str in sliced_lines:
+            proto = p_str.split("://")[0].lower()
+            if proto not in target_protocols:
+                continue
+            if p_str not in seen and p_str not in dead_proxies:
+                seen.add(p_str)
+                proxy_urls.append(p_str)
+                if len(proxy_urls) >= limit:
+                    break
+
+        if len(proxy_urls) < limit:
+            for p_str in lines_collected:
+                proto = p_str.split("://")[0].lower()
+                if proto not in target_protocols:
+                    continue
+                if p_str not in seen and p_str not in dead_proxies:
+                    seen.add(p_str)
+                    proxy_urls.append(p_str)
+                    if len(proxy_urls) >= limit:
+                        break
+
+    return proxy_urls, total_found
+
+def fetch_databay_proxies(
+    limit: int = 500,
+    offset: int | None = None,
+    countries: list[str] | None = None,
+    protocols: list[str] | None = None,
+    timeout: float = 8.0
+) -> list[str]:
+    """Helper returning list of Databay proxies."""
+    urls, _ = fetch_databay_free_list(limit=limit, offset=offset, countries=countries, protocols=protocols, timeout=timeout)
+    return urls
+
 def fetch_backup_proxies_paginated(limit: int = 250, offset: int = 0, countries: list[str] | None = None) -> list[str]:
     """
-    Backup paginated proxies from ProxyScrape, Proxifly, TheSpeedX, and IPLocate mirrors.
+    Backup paginated proxies from ProxyScrape, Proxifly, TheSpeedX, IPLocate, and Databay mirrors.
     Rotates through offset circularly so duplicate proxies are avoided and loops back to start when exhausted.
     """
     dead_proxies = get_dead_proxies()
@@ -812,6 +984,19 @@ def fetch_backup_proxies_paginated(limit: int = 250, offset: int = 0, countries:
             if iplocate_list:
                 sliced_ip, _, _ = circular_slice(iplocate_list, offset, limit)
                 for p in sliced_ip:
+                    if p not in seen and p not in dead_proxies:
+                        seen.add(p)
+                        results.append(p)
+        except Exception:
+            pass
+
+    # 5. Databay live pool
+    if len(results) < limit:
+        try:
+            db_list = fetch_databay_proxies(limit=limit * 2, offset=offset, countries=countries, timeout=6.0)
+            if db_list:
+                sliced_db, _, _ = circular_slice(db_list, offset, limit)
+                for p in sliced_db:
                     if p not in seen and p not in dead_proxies:
                         seen.add(p)
                         results.append(p)
@@ -959,21 +1144,22 @@ def get_and_verify_proxies(
     # Default: Global (Semua negara jika countries is None)
     c_str = (", ".join(countries[:6]) + ("..." if len(countries) > 6 else "")) if countries else "GLOBAL (Semua Negara / Worldwide)"
     print(f"\n{BOLD}{CYAN}==================================================================={RESET}")
-    print(f"{BOLD}    PENTA-SOURCE GLOBAL PROXY (GEONODE + PROXYSCRAPE + PROXIFLY + THESPEEDX + IPLOCATE)  {RESET}")
+    print(f"{BOLD}    HEXA-SOURCE GLOBAL PROXY (GEONODE + PROXYSCRAPE + PROXIFLY + THESPEEDX + IPLOCATE + DATABAY)  {RESET}")
     print(f"{BOLD}{CYAN}==================================================================={RESET}")
     print(f"{CYAN}[PAGINASI GEONODE]{RESET} Halaman {BOLD}{p_num}{RESET} (Rentang Items: {BOLD}{start_item} - {end_item}{RESET})")
     print(f"{CYAN}[KRITERIA]{RESET} Prioritas: {BOLD}{mode_desc}{RESET}")
     print(f"{CYAN}[CAKUPAN] {RESET} {c_str}")
 
-    # 1. Fetch simultan dari Geonode, ProxyScrape, Proxifly, TheSpeedX, dan IPLocate
-    print(f"{CYAN}[PENTA-FETCH]{RESET} Mengambil proxy secara simultan dari Geonode, ProxyScrape, Proxifly, TheSpeedX & IPLocate (Global)...")
+    # 1. Fetch simultan dari Geonode, ProxyScrape, Proxifly, TheSpeedX, IPLocate, dan Databay
+    print(f"{CYAN}[HEXA-FETCH]{RESET} Mengambil proxy secara simultan dari Geonode, ProxyScrape, Proxifly, TheSpeedX, IPLocate & Databay (Global)...")
     raw_geonode = []
     raw_proxyscrape = []
     raw_proxifly = []
     raw_thespeedx = []
     raw_iplocate = []
+    raw_databay = []
 
-    with ThreadPoolExecutor(max_workers=5) as ingest_pool:
+    with ThreadPoolExecutor(max_workers=6) as ingest_pool:
         fut_geonode = ingest_pool.submit(
             fetch_geonode_proxies,
             limit=limit,
@@ -999,6 +1185,11 @@ def get_and_verify_proxies(
         fut_iplocate = ingest_pool.submit(
             fetch_iplocate_free_list,
             limit=max(limit * 2, 1500),
+            countries=countries
+        )
+        fut_db = ingest_pool.submit(
+            fetch_databay_free_list,
+            limit=max(limit * 2, 1000),
             countries=countries
         )
         try:
@@ -1031,13 +1222,19 @@ def get_and_verify_proxies(
             print(f"{YELLOW}[WARN] Error fetch IPLocate: {e}{RESET}")
             raw_iplocate = []
 
-    print(f"{GREEN}[INGEST-OK]{RESET} Diperoleh: {BOLD}{len(raw_geonode)}{RESET} dari Geonode | {BOLD}{len(raw_proxyscrape)}{RESET} dari ProxyScrape | {BOLD}{len(raw_proxifly)}{RESET} dari Proxifly | {BOLD}{len(raw_thespeedx)}{RESET} dari TheSpeedX | {BOLD}{len(raw_iplocate)}{RESET} dari IPLocate")
+        try:
+            raw_databay, _ = fut_db.result()
+        except Exception as e:
+            print(f"{YELLOW}[WARN] Error fetch Databay: {e}{RESET}")
+            raw_databay = []
 
-    # Interleave proxy baru dari kelima sumber agar terdistribusi merata
+    print(f"{GREEN}[INGEST-OK]{RESET} Diperoleh: {BOLD}{len(raw_geonode)}{RESET} dari Geonode | {BOLD}{len(raw_proxyscrape)}{RESET} dari ProxyScrape | {BOLD}{len(raw_proxifly)}{RESET} dari Proxifly | {BOLD}{len(raw_thespeedx)}{RESET} dari TheSpeedX | {BOLD}{len(raw_iplocate)}{RESET} dari IPLocate | {BOLD}{len(raw_databay)}{RESET} dari Databay")
+
+    # Interleave proxy baru dari keenam sumber agar terdistribusi merata
     dead_proxies = get_dead_proxies()
     interleaved_new = []
     seen = set()
-    max_src_len = max(len(raw_geonode), len(raw_proxyscrape), len(raw_proxifly), len(raw_thespeedx), len(raw_iplocate))
+    max_src_len = max(len(raw_geonode), len(raw_proxyscrape), len(raw_proxifly), len(raw_thespeedx), len(raw_iplocate), len(raw_databay))
     for i in range(max_src_len):
         if i < len(raw_geonode):
             p = raw_geonode[i]
@@ -1061,6 +1258,11 @@ def get_and_verify_proxies(
                 interleaved_new.append(p)
         if i < len(raw_iplocate):
             p = raw_iplocate[i]
+            if p not in seen and p not in dead_proxies:
+                seen.add(p)
+                interleaved_new.append(p)
+        if i < len(raw_databay):
+            p = raw_databay[i]
             if p not in seen and p not in dead_proxies:
                 seen.add(p)
                 interleaved_new.append(p)

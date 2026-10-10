@@ -829,7 +829,7 @@ class YouTubeStudioGUI:
                 self._append_log("INIT", "Mode Cache Lokal: Penyimpanan di-reset ke 0.", "cyan")
                 proxy_list = load_proxies(config.proxy_file)
             else:
-                self._append_log("INIT", "Mengambil batch awal proxy fresh Global (Geonode + ProxyScrape + Proxifly + TheSpeedX + IPLocate)...", "cyan")
+                self._append_log("INIT", "Mengambil batch awal proxy fresh Global (Geonode + ProxyScrape + Proxifly + TheSpeedX + IPLocate + Databay)...", "cyan")
                 try:
                     fresh = get_and_verify_proxies(
                         limit=config.proxy_limit,
@@ -1027,7 +1027,7 @@ class YouTubeStudioGUI:
     # =====================================================================
     def _refresh_proxies_async(self):
         self.btn_refresh_proxy.config(state="disabled")
-        self._append_log("HYBRID", "Mengambil batch proxy simultan Global (Geonode + ProxyScrape + Proxifly + TheSpeedX + IPLocate)...", "cyan")
+        self._append_log("HYBRID", "Mengambil batch proxy simultan Global (Geonode + ProxyScrape + Proxifly + TheSpeedX + IPLocate + Databay)...", "cyan")
 
         def _task():
             try:
