@@ -2126,8 +2126,36 @@ def main():
         time.sleep(1.5) # Stagger worker launches
 
     try:
+        last_proxy_check = 0.0
+        last_reported_proxy_count = len(proxy_list)
         while not stop_event.is_set():
             time.sleep(1)
+            now = time.time()
+            if not args.direct and (now - last_proxy_check >= 3.0):
+                last_proxy_check = now
+                try:
+                    from geonode_fetcher import DEFAULT_OUTPUT_JSON, get_dead_proxies
+                    target_file = args.proxy_file or DEFAULT_OUTPUT_JSON
+                    if os.path.exists(target_file):
+                        dead = get_dead_proxies()
+                        with open(target_file, "r", encoding="utf-8", errors="ignore") as f:
+                            p_data = json.load(f)
+                        if isinstance(p_data, list):
+                            cur_count = len([
+                                x for x in p_data
+                                if (x.get("proxy") if isinstance(x, dict) else str(x)).strip() not in dead
+                            ])
+                            if cur_count != last_reported_proxy_count:
+                                if cur_count > last_reported_proxy_count:
+                                    safe_log("PROXIES", f"🔄 Pool proxy bertambah: {cur_count} proxy aktif siap (+{cur_count - last_reported_proxy_count})", GREEN)
+                                else:
+                                    safe_log("PROXIES", f"⚠️ Proxy tereliminasi: Sisa {cur_count} proxy aktif (-{last_reported_proxy_count - cur_count})", YELLOW)
+                                last_reported_proxy_count = cur_count
+                                if telemetry_q is not None:
+                                    telemetry_q.put({"event": "proxy_count_update", "count": cur_count})
+                except Exception:
+                    pass
+
             with success_counter.get_lock():
                 current = success_counter.value
             if not args.infinite and current >= args.batch_count:

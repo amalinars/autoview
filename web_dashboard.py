@@ -4,6 +4,7 @@ import time
 import json
 import asyncio
 import threading
+import collections
 from typing import Dict, Any, Optional
 from starlette.applications import Starlette
 from starlette.responses import JSONResponse, HTMLResponse, StreamingResponse
@@ -18,10 +19,36 @@ def format_elapsed(seconds: float) -> str:
         return f"{h:02d}:{m:02d}:{s:02d}"
     return f"{m:02d}:{s:02d}"
 
+def get_live_proxy_count(filepath: Optional[str] = None) -> int:
+    """Returns the true number of working proxies in the active storage file."""
+    try:
+        from geonode_fetcher import DEFAULT_OUTPUT_JSON, get_dead_proxies
+        target_path = filepath or DEFAULT_OUTPUT_JSON
+        if not os.path.exists(target_path):
+            return 0
+        dead = get_dead_proxies()
+        with open(target_path, "r", encoding="utf-8", errors="ignore") as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            return len([
+                x for x in data
+                if (x.get("proxy") if isinstance(x, dict) else str(x)).strip() not in dead
+            ])
+    except Exception:
+        pass
+    return 0
+
 class DashboardStateManager:
     def __init__(self, initial_config: Optional[Dict[str, Any]] = None):
         cfg = initial_config or {}
         self.start_time = time.time()
+        self.proxy_file = cfg.get("proxy_file")
+        self.direct = cfg.get("direct", False)
+        
+        initial_proxies = cfg.get("proxy_count", 0)
+        if not self.direct and initial_proxies == 0:
+            initial_proxies = get_live_proxy_count(self.proxy_file)
+
         self.summary = {
             "batch_target": cfg.get("batch_count", 0),
             "is_infinite": cfg.get("infinite", False),
@@ -30,11 +57,13 @@ class DashboardStateManager:
             "total_views": 0,
             "total_ads_skipped": 0,
             "active_workers": cfg.get("workers", 0),
-            "active_proxies": cfg.get("proxy_count", 0),
+            "active_proxies": initial_proxies,
             "uptime_seconds": 0,
             "uptime_str": "00:00",
+            "bot_status": "RUNNING",
         }
         self.workers: Dict[int, Dict[str, Any]] = {}
+        self.logs = collections.deque(maxlen=300)
         self._listeners: list[asyncio.Queue] = []
         self._lock = threading.Lock()
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -46,9 +75,14 @@ class DashboardStateManager:
         with self._lock:
             self.summary["uptime_seconds"] = int(time.time() - self.start_time)
             self.summary["uptime_str"] = format_elapsed(self.summary["uptime_seconds"])
+            if not self.direct:
+                live_p = get_live_proxy_count(self.proxy_file)
+                if live_p > 0 or self.summary["active_proxies"] == 0:
+                    self.summary["active_proxies"] = live_p
             return {
                 "summary": dict(self.summary),
-                "workers": {w_id: dict(data) for w_id, data in self.workers.items()}
+                "workers": {w_id: dict(data) for w_id, data in self.workers.items()},
+                "logs": list(self.logs)
             }
 
     def subscribe(self) -> asyncio.Queue:
@@ -79,7 +113,25 @@ class DashboardStateManager:
         event = data.get("event")
         worker_id = data.get("worker_id")
 
+        # 1. Log event: simpan di circular buffer dan broadcast ke stream web
+        if event == "log":
+            log_item = {
+                "timestamp": data.get("timestamp") or time.strftime("%H:%M:%S"),
+                "prefix": data.get("prefix", str(worker_id or "SYSTEM")),
+                "message": data.get("message", ""),
+                "color": data.get("color", "cyan")
+            }
+            with self._lock:
+                self.logs.append(log_item)
+            self._broadcast("log", log_item)
+            return
+
         with self._lock:
+            # 2. Proxy count update
+            if event == "proxy_count_update":
+                self.summary["active_proxies"] = data.get("count", self.summary["active_proxies"])
+
+            # 3. Worker telemetry events
             if isinstance(worker_id, int):
                 if worker_id not in self.workers:
                     self.workers[worker_id] = {
@@ -114,10 +166,11 @@ class DashboardStateManager:
                     w["status"] = data.get("status", w["status"])
                     w["details"] = data.get("details", "")
                     st = w["status"]
-                    if st == "NAVIGASI": w["status_color"] = "amber"
+                    if st in ("NAVIGASI", "MASUK_CHANNEL", "MENCARI"): w["status_color"] = "amber"
                     elif st == "MENONTON": w["status_color"] = "green"
-                    elif st == "COOLDOWN": w["status_color"] = "purple"
-                    elif st in ("ERROR", "GAGAL"): w["status_color"] = "red"
+                    elif st in ("COOLDOWN", "JEDA"): w["status_color"] = "purple"
+                    elif st in ("ERROR", "GAGAL", "TIMEOUT", "ERROR_KONEKSI", "BOT_BLOCKED"): w["status_color"] = "red"
+                    elif st == "SUKSES": w["status_color"] = "green"
 
                 elif event == "video_chosen":
                     w["video_title"] = data.get("title", "")
@@ -156,16 +209,21 @@ class DashboardStateManager:
                     total_ads = sum(wk["ads_skipped"] for wk in self.workers.values())
                     self.summary["total_ads_skipped"] = total_ads
 
-                elif event == "watch_complete":
+                elif event in ("watch_complete", "session_success"):
                     w["status"] = "SUKSES"
                     w["status_color"] = "green"
                     w["details"] = data.get("details", "Selesai")
-                    self.summary["total_views"] += 1
+                    if "total_success" in data:
+                        self.summary["total_views"] = data["total_success"]
+                    else:
+                        self.summary["total_views"] += 1
 
-            if event == "proxy_count_update":
-                self.summary["active_proxies"] = data.get("count", self.summary["active_proxies"])
+                elif event == "session_failed":
+                    w["status"] = data.get("status", "GAGAL")
+                    w["status_color"] = "red"
+                    w["details"] = data.get("details", "Gagal")
 
-        # Broadcast update to web clients
+        # Broadcast snapshot update to web clients
         self._broadcast("update", self.get_snapshot())
 
 def create_app(state_manager: DashboardStateManager, static_html_path: Optional[str] = None) -> Starlette:
@@ -184,6 +242,18 @@ def create_app(state_manager: DashboardStateManager, static_html_path: Optional[
 
     async def health(request):
         return JSONResponse({"status": "ok"})
+
+    async def get_logs(request):
+        with state_manager._lock:
+            return JSONResponse({"logs": list(state_manager.logs)})
+
+    async def refresh_proxies(request):
+        try:
+            from geonode_fetcher import trigger_refill
+            trigger_refill()
+            return JSONResponse({"status": "ok", "message": "Auto-refill proxy dipicu di background."})
+        except Exception as e:
+            return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
     async def sse_stream(request):
         loop = asyncio.get_running_loop()
@@ -223,6 +293,8 @@ def create_app(state_manager: DashboardStateManager, static_html_path: Optional[
         Route("/", endpoint=index, methods=["GET"]),
         Route("/api/status", endpoint=get_status, methods=["GET"]),
         Route("/api/health", endpoint=health, methods=["GET"]),
+        Route("/api/logs", endpoint=get_logs, methods=["GET"]),
+        Route("/api/refresh-proxies", endpoint=refresh_proxies, methods=["POST", "GET"]),
         Route("/api/stream", endpoint=sse_stream, methods=["GET"]),
     ]
     return Starlette(routes=routes)

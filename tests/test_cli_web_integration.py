@@ -33,6 +33,30 @@ class TestCLIWebIntegration(unittest.TestCase):
             self.assertIn("event: init", line1)
             self.assertIn("integration test", line2)
 
+        # Push mock log event
+        q.put({
+            "worker_id": "INIT",
+            "event": "log",
+            "timestamp": "12:00:00",
+            "prefix": "INIT",
+            "message": "Testing log streaming",
+            "color": "cyan"
+        })
+        time.sleep(0.3)
+        snap_after_log = state.get_snapshot()
+        self.assertGreater(len(snap_after_log["logs"]), 0)
+        self.assertEqual(snap_after_log["logs"][-1]["message"], "Testing log streaming")
+
+        # Verify /api/logs endpoint
+        req_logs = urllib.request.Request("http://127.0.0.1:5099/api/logs")
+        with urllib.request.urlopen(req_logs, timeout=3.0) as resp:
+            self.assertEqual(resp.status, 200)
+
+        # Verify /api/refresh-proxies endpoint
+        req_ref = urllib.request.Request("http://127.0.0.1:5099/api/refresh-proxies", method="POST")
+        with urllib.request.urlopen(req_ref, timeout=3.0) as resp:
+            self.assertEqual(resp.status, 200)
+
         # Send shutdown event
         q.put({"event": "SHUTDOWN"})
 
