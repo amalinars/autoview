@@ -3,7 +3,7 @@ from geonode_fetcher import fetch_proxifly_free_list, fetch_proxifly_proxies
 
 class TestProxiflyIngestion(unittest.TestCase):
     def test_fetch_proxifly_free_list_structure(self):
-        proxies, total = fetch_proxifly_free_list(limit=20)
+        proxies, total = fetch_proxifly_free_list(limit=20, timeout=10.0)
         self.assertIsInstance(proxies, list)
         self.assertIsInstance(total, int)
         self.assertGreater(total, 0)

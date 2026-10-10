@@ -75,7 +75,8 @@ def load_pagination_state() -> dict:
         "last_fetch_time": 0,
         "proxyscrape_offset": 0,
         "proxifly_offset": 0,
-        "thespeedx_offset": 0
+        "thespeedx_offset": 0,
+        "iplocate_offset": 0
     }
     if os.path.exists(PAGINATION_STATE_FILE):
         try:
@@ -281,7 +282,8 @@ def reset_proxy_storage(
                 "last_fetch_time": 0,
                 "proxyscrape_offset": 0,
                 "proxifly_offset": 0,
-                "thespeedx_offset": 0
+                "thespeedx_offset": 0,
+                "iplocate_offset": 0
             }
             save_pagination_state(default_state)
         except Exception:
@@ -465,6 +467,28 @@ def fetch_proxifly_free_list(
         except Exception:
             continue
 
+    if not lines_collected and not countries:
+        # Fallback to protocol specific files if all/data.txt timed out
+        for proto in ["socks5", "http"]:
+            for fb_u in [
+                f"https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/protocols/{proto}/data.txt",
+                f"https://raw.githubusercontent.com/proxifly/free-proxy-list@main/proxies/protocols/{proto}/data.txt"
+            ]:
+                try:
+                    req = urllib.request.Request(fb_u, headers={"User-Agent": USER_AGENT})
+                    with urllib.request.urlopen(req, timeout=timeout) as resp:
+                        text = resp.read().decode("utf-8", errors="ignore")
+                        for line in text.splitlines():
+                            line = line.strip()
+                            if line and "://" in line:
+                                lines_collected.append(line)
+                    if lines_collected:
+                        break
+                except Exception:
+                    continue
+            if lines_collected:
+                break
+
     total_found = len(lines_collected)
     if lines_collected:
         state = load_pagination_state()
@@ -609,9 +633,134 @@ def fetch_thespeedx_proxies(limit: int = 500, offset: int | None = None, protoco
     urls, _ = fetch_thespeedx_free_list(limit=limit, offset=offset, protocols=protocols, timeout=timeout)
     return urls
 
+def fetch_iplocate_free_list(
+    limit: int = 500,
+    offset: int | None = None,
+    countries: list[str] | None = None,
+    protocols: list[str] | None = None,
+    timeout: float = 6.0
+) -> tuple[list[str], int]:
+    """
+    Fetch high-speed proxies from IPLocate official free-proxy-list repository
+    (https://github.com/iplocate/free-proxy-list).
+    Updated every 30 minutes with validated, anonymizing HTTP, HTTPS, SOCKS4, and SOCKS5 proxies.
+    Uses circular pagination: loops back to beginning when pool is exhausted.
+    Returns (proxy_urls, total_found).
+    """
+    target_protocols = set(p.lower() for p in protocols) if protocols else {"http", "https", "socks4", "socks5"}
+    dead_proxies = get_dead_proxies()
+    proxy_urls = []
+    seen = set()
+    lines_collected = []
+
+    urls_to_try = []
+    if countries:
+        for cc in countries[:6]:
+            c_up = cc.upper()
+            urls_to_try.append(f"https://cdn.jsdelivr.net/gh/iplocate/free-proxy-list@main/countries/{c_up}/proxies.txt")
+            urls_to_try.append(f"https://raw.githubusercontent.com/iplocate/free-proxy-list/main/countries/{c_up}/proxies.txt")
+    else:
+        urls_to_try.append("https://cdn.jsdelivr.net/gh/iplocate/free-proxy-list@main/all-proxies.txt")
+        urls_to_try.append("https://raw.githubusercontent.com/iplocate/free-proxy-list/main/all-proxies.txt")
+
+    for u in urls_to_try:
+        try:
+            req = urllib.request.Request(u, headers={"User-Agent": USER_AGENT})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                text = resp.read().decode("utf-8", errors="ignore")
+                for line in text.splitlines():
+                    line = line.strip()
+                    if line and "://" in line:
+                        lines_collected.append(line)
+            if not countries and lines_collected:
+                break
+        except Exception:
+            continue
+
+    # Fallback to protocols endpoints if all-proxies was empty
+    if not lines_collected and not countries:
+        proto_files = [
+            ("socks5", [
+                "https://cdn.jsdelivr.net/gh/iplocate/free-proxy-list@main/protocols/socks5.txt",
+                "https://raw.githubusercontent.com/iplocate/free-proxy-list/main/protocols/socks5.txt"
+            ]),
+            ("socks4", [
+                "https://cdn.jsdelivr.net/gh/iplocate/free-proxy-list@main/protocols/socks4.txt",
+                "https://raw.githubusercontent.com/iplocate/free-proxy-list/main/protocols/socks4.txt"
+            ]),
+            ("http", [
+                "https://cdn.jsdelivr.net/gh/iplocate/free-proxy-list@main/protocols/http.txt",
+                "https://raw.githubusercontent.com/iplocate/free-proxy-list/main/protocols/http.txt"
+            ])
+        ]
+        for proto, mirrors in proto_files:
+            if proto not in target_protocols:
+                continue
+            for u in mirrors:
+                try:
+                    req = urllib.request.Request(u, headers={"User-Agent": USER_AGENT})
+                    with urllib.request.urlopen(req, timeout=timeout) as resp:
+                        lines = resp.read().decode("utf-8", errors="ignore").splitlines()
+                        for line in lines:
+                            line = line.strip()
+                            if line and ":" in line:
+                                lines_collected.append(f"{proto}://{line}")
+                        if lines_collected:
+                            break
+                except Exception:
+                    continue
+
+    total_found = len(lines_collected)
+    if lines_collected:
+        state = load_pagination_state()
+        use_persistent = (offset is None)
+        curr_offset = state.get("iplocate_offset", 0) if use_persistent else offset
+
+        sliced_lines, next_offset, wrapped = circular_slice(lines_collected, curr_offset, max(limit * 2, 800))
+        if wrapped and curr_offset > 0:
+            print(f"{CYAN}[PAGINASI-ROTASI]{RESET} IPLocate: Akhir daftar tercapai ({len(lines_collected)} proxy). Berputar kembali ke awal (Halaman 1 / Offset 0)...")
+
+        if use_persistent:
+            state["iplocate_offset"] = next_offset
+            save_pagination_state(state)
+
+        for p_str in sliced_lines:
+            proto = p_str.split("://")[0].lower()
+            if proto not in target_protocols:
+                continue
+            if p_str not in seen and p_str not in dead_proxies:
+                seen.add(p_str)
+                proxy_urls.append(p_str)
+                if len(proxy_urls) >= limit:
+                    break
+
+        if len(proxy_urls) < limit:
+            for p_str in lines_collected:
+                proto = p_str.split("://")[0].lower()
+                if proto not in target_protocols:
+                    continue
+                if p_str not in seen and p_str not in dead_proxies:
+                    seen.add(p_str)
+                    proxy_urls.append(p_str)
+                    if len(proxy_urls) >= limit:
+                        break
+
+    return proxy_urls, total_found
+
+def fetch_iplocate_proxies(
+    limit: int = 500,
+    offset: int | None = None,
+    countries: list[str] | None = None,
+    protocols: list[str] | None = None,
+    timeout: float = 6.0
+) -> list[str]:
+    """Helper returning list of IPLocate proxies."""
+    urls, _ = fetch_iplocate_free_list(limit=limit, offset=offset, countries=countries, protocols=protocols, timeout=timeout)
+    return urls
+
 def fetch_backup_proxies_paginated(limit: int = 250, offset: int = 0, countries: list[str] | None = None) -> list[str]:
     """
-    Backup paginated proxies from ProxyScrape, Proxifly, TheSpeedX, and high-speed GitHub SOCKS/HTTP mirrors.
+    Backup paginated proxies from ProxyScrape, Proxifly, TheSpeedX, and IPLocate mirrors.
     Rotates through offset circularly so duplicate proxies are avoided and loops back to start when exhausted.
     """
     dead_proxies = get_dead_proxies()
@@ -650,6 +799,19 @@ def fetch_backup_proxies_paginated(limit: int = 250, offset: int = 0, countries:
             if speedx_list:
                 sliced_sx, _, _ = circular_slice(speedx_list, offset, limit)
                 for p in sliced_sx:
+                    if p not in seen and p not in dead_proxies:
+                        seen.add(p)
+                        results.append(p)
+        except Exception:
+            pass
+
+    # 4. IPLocate 30-min refreshed pool
+    if len(results) < limit:
+        try:
+            iplocate_list = fetch_iplocate_proxies(limit=limit * 2, offset=offset, countries=countries, timeout=6.0)
+            if iplocate_list:
+                sliced_ip, _, _ = circular_slice(iplocate_list, offset, limit)
+                for p in sliced_ip:
                     if p not in seen and p not in dead_proxies:
                         seen.add(p)
                         results.append(p)
@@ -797,20 +959,21 @@ def get_and_verify_proxies(
     # Default: Global (Semua negara jika countries is None)
     c_str = (", ".join(countries[:6]) + ("..." if len(countries) > 6 else "")) if countries else "GLOBAL (Semua Negara / Worldwide)"
     print(f"\n{BOLD}{CYAN}==================================================================={RESET}")
-    print(f"{BOLD}    QUAD-SOURCE GLOBAL PROXY (GEONODE + PROXYSCRAPE + PROXIFLY + THESPEEDX)  {RESET}")
+    print(f"{BOLD}    PENTA-SOURCE GLOBAL PROXY (GEONODE + PROXYSCRAPE + PROXIFLY + THESPEEDX + IPLOCATE)  {RESET}")
     print(f"{BOLD}{CYAN}==================================================================={RESET}")
     print(f"{CYAN}[PAGINASI GEONODE]{RESET} Halaman {BOLD}{p_num}{RESET} (Rentang Items: {BOLD}{start_item} - {end_item}{RESET})")
     print(f"{CYAN}[KRITERIA]{RESET} Prioritas: {BOLD}{mode_desc}{RESET}")
     print(f"{CYAN}[CAKUPAN] {RESET} {c_str}")
 
-    # 1. Fetch simultan dari Geonode, ProxyScrape, Proxifly, dan TheSpeedX
-    print(f"{CYAN}[QUAD-FETCH]{RESET} Mengambil proxy secara simultan dari Geonode, ProxyScrape, Proxifly & TheSpeedX (Global)...")
+    # 1. Fetch simultan dari Geonode, ProxyScrape, Proxifly, TheSpeedX, dan IPLocate
+    print(f"{CYAN}[PENTA-FETCH]{RESET} Mengambil proxy secara simultan dari Geonode, ProxyScrape, Proxifly, TheSpeedX & IPLocate (Global)...")
     raw_geonode = []
     raw_proxyscrape = []
     raw_proxifly = []
     raw_thespeedx = []
+    raw_iplocate = []
 
-    with ThreadPoolExecutor(max_workers=4) as ingest_pool:
+    with ThreadPoolExecutor(max_workers=5) as ingest_pool:
         fut_geonode = ingest_pool.submit(
             fetch_geonode_proxies,
             limit=limit,
@@ -832,6 +995,11 @@ def get_and_verify_proxies(
         fut_sx = ingest_pool.submit(
             fetch_thespeedx_free_list,
             limit=max(limit * 2, 1500)
+        )
+        fut_iplocate = ingest_pool.submit(
+            fetch_iplocate_free_list,
+            limit=max(limit * 2, 1500),
+            countries=countries
         )
         try:
             raw_geonode, _ = fut_geonode.result()
@@ -857,13 +1025,19 @@ def get_and_verify_proxies(
             print(f"{YELLOW}[WARN] Error fetch TheSpeedX: {e}{RESET}")
             raw_thespeedx = []
 
-    print(f"{GREEN}[INGEST-OK]{RESET} Diperoleh: {BOLD}{len(raw_geonode)}{RESET} dari Geonode | {BOLD}{len(raw_proxyscrape)}{RESET} dari ProxyScrape | {BOLD}{len(raw_proxifly)}{RESET} dari Proxifly | {BOLD}{len(raw_thespeedx)}{RESET} dari TheSpeedX")
+        try:
+            raw_iplocate, _ = fut_iplocate.result()
+        except Exception as e:
+            print(f"{YELLOW}[WARN] Error fetch IPLocate: {e}{RESET}")
+            raw_iplocate = []
 
-    # Interleave proxy baru dari keempat sumber agar terdistribusi merata
+    print(f"{GREEN}[INGEST-OK]{RESET} Diperoleh: {BOLD}{len(raw_geonode)}{RESET} dari Geonode | {BOLD}{len(raw_proxyscrape)}{RESET} dari ProxyScrape | {BOLD}{len(raw_proxifly)}{RESET} dari Proxifly | {BOLD}{len(raw_thespeedx)}{RESET} dari TheSpeedX | {BOLD}{len(raw_iplocate)}{RESET} dari IPLocate")
+
+    # Interleave proxy baru dari kelima sumber agar terdistribusi merata
     dead_proxies = get_dead_proxies()
     interleaved_new = []
     seen = set()
-    max_src_len = max(len(raw_geonode), len(raw_proxyscrape), len(raw_proxifly), len(raw_thespeedx))
+    max_src_len = max(len(raw_geonode), len(raw_proxyscrape), len(raw_proxifly), len(raw_thespeedx), len(raw_iplocate))
     for i in range(max_src_len):
         if i < len(raw_geonode):
             p = raw_geonode[i]
@@ -882,6 +1056,11 @@ def get_and_verify_proxies(
                 interleaved_new.append(p)
         if i < len(raw_thespeedx):
             p = raw_thespeedx[i]
+            if p not in seen and p not in dead_proxies:
+                seen.add(p)
+                interleaved_new.append(p)
+        if i < len(raw_iplocate):
+            p = raw_iplocate[i]
             if p not in seen and p not in dead_proxies:
                 seen.add(p)
                 interleaved_new.append(p)

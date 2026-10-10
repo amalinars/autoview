@@ -50,5 +50,11 @@ class TestCircularPagination(unittest.TestCase):
         self.assertEqual(end_item, 250)
         self.assertEqual(desc, SORT_MODES[1][2])
 
+    def test_all_provider_offsets_in_state(self):
+        state = load_pagination_state()
+        for key in ["page", "proxyscrape_offset", "proxifly_offset", "thespeedx_offset", "iplocate_offset"]:
+            self.assertIn(key, state)
+            self.assertIsInstance(state[key], int)
+
 if __name__ == "__main__":
     unittest.main()

@@ -1949,7 +1949,7 @@ def main():
     parser.add_argument(
         "--skip-fetch",
         action="store_true",
-        help="Lewati download dan pengecekan proxy Geonode + ProxyScrape + Proxifly + TheSpeedX (gunakan cache file yang ada)"
+        help="Lewati download dan pengecekan proxy Geonode + ProxyScrape + Proxifly + TheSpeedX + IPLocate (gunakan cache file yang ada)"
     )
     parser.add_argument(
         "--proxy-limit",
@@ -2052,7 +2052,7 @@ def main():
             safe_log("INIT", "Mode --skip-fetch aktif, memuat proxy dari cache lokal...", CYAN)
             proxy_list = load_proxies(args.proxy_file)
         else:
-            safe_log("INIT", "Mengambil & menguji batch awal proxy fresh Global (Geonode + ProxyScrape + Proxifly + TheSpeedX)...", CYAN)
+            safe_log("INIT", "Mengambil & menguji batch awal proxy fresh Global (Geonode + ProxyScrape + Proxifly + TheSpeedX + IPLocate)...", CYAN)
             try:
                 fresh_proxies = get_and_verify_proxies(
                     limit=args.proxy_limit,
