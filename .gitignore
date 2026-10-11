@@ -12,6 +12,7 @@ tempmediaStorage/
 .dead_proxies.json
 .pagination_state.json
 .recent_videos.json
+.proxy_geo_cache.json
 .refill_trigger
 working_yt_proxies.json
 working_yt_proxies.txt

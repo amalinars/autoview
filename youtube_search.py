@@ -1359,10 +1359,18 @@ def watch_video_with_lock(page, worker_name: str, video_title: str, min_percent:
     last_cur_time = -1
     last_cur_time_stuck_start = None
 
+    current_page_url = ""
+    try:
+        current_page_url = page.url if not page.is_closed() else ""
+    except Exception:
+        pass
+
     send_telemetry(
         worker_id,
         "watch_start",
         title=video_title,
+        url=current_page_url,
+        channel=target_chan,
         total_duration=total_duration,
         target_duration=target_watch_sec,
         target_percent=chosen_percent,
@@ -1509,6 +1517,12 @@ def watch_video_with_lock(page, worker_name: str, video_title: str, min_percent:
 
         play_pos_str = f"Play: {format_time(current_play_time)} / {format_time(total_duration)}"
         total_ads = skippable_ads_count + nonskippable_ads_count
+        cur_url = ""
+        try:
+            cur_url = page.url if not page.is_closed() else ""
+        except Exception:
+            pass
+
         send_telemetry(
             worker_id,
             "watch_progress",
@@ -1516,6 +1530,9 @@ def watch_video_with_lock(page, worker_name: str, video_title: str, min_percent:
             target=target_watch_sec,
             percent=chosen_percent,
             total_duration=total_duration,
+            current_play_time=current_play_time,
+            video_url=cur_url,
+            channel=target_chan,
             ad_count=total_ads,
             skippable_ads=skippable_ads_count,
             nonskippable_ads=nonskippable_ads_count,
@@ -1619,8 +1636,24 @@ def worker_process_main(worker_id: int, args, proxy_list: list, success_counter,
         fp = generate_unique_fingerprint()
 
         gpu_short = fp["webgl_vendor"].split(" ")[-1].replace("(", "").replace(")", "")
-        safe_log(worker_name, f"Proxy: {proxy_url if proxy_url else 'Direct'} | 🎭 Persona: {fp['uadata_platform']} (Chrome {fp['major_ver']} | {gpu_short} | {fp['screen_w']}x{fp['screen_h']})", CYAN)
-        send_telemetry(worker_id, "proxy_selected", proxy=proxy_url if proxy_url else "Direct", status="PROXY_TERPILIH", details=proxy_url if proxy_url else "Direct")
+        persona_str = f"{fp['uadata_platform']} • Chrome {fp['major_ver']} • {gpu_short} • {fp['screen_w']}x{fp['screen_h']}"
+        
+        from bot_controller import resolve_proxy_country, format_proxy_with_flag
+        cc, flag = resolve_proxy_country(proxy_url)
+        formatted_proxy = format_proxy_with_flag(proxy_url, cc, flag)
+
+        safe_log(worker_name, f"Proxy: {formatted_proxy} | 🎭 Persona: {persona_str}", CYAN)
+        send_telemetry(
+            worker_id,
+            "proxy_selected",
+            proxy=proxy_url if proxy_url else "Direct",
+            proxy_display=formatted_proxy,
+            country=cc,
+            country_flag=flag,
+            persona=persona_str,
+            status="PROXY_TERPILIH",
+            details=formatted_proxy
+        )
 
         session_success = False
         with sync_playwright() as p:
@@ -1783,8 +1816,16 @@ def worker_process_main(worker_id: int, args, proxy_list: list, success_counter,
                 # Catat ke riwayat rotasi agar tidak ditonton berturut-turut di sesi berikutnya
                 record_watched_video(chosen_href, chosen_title)
 
-                safe_log(worker_name, f"🎬 Video Terpilih [{way_name}]: '{chosen_title[:42]}...' [{dur_str}]", GREEN)
-                send_telemetry(worker_id, "video_chosen", title=chosen_title, status="NAVIGASI", details=f"Membuka: {chosen_title[:32]}... [{dur_str}]")
+                full_video_url = ("https://www.youtube.com" + chosen_href) if chosen_href.startswith("/") else chosen_href
+                send_telemetry(
+                    worker_id,
+                    "video_chosen",
+                    title=chosen_title,
+                    url=full_video_url,
+                    channel=target_chan,
+                    status="NAVIGASI",
+                    details=f"Membuka: {chosen_title[:32]}... [{dur_str}]"
+                )
 
                 # Buka video yang dipilih secara presisi (HANYA link yang memiliki href video tersebut)
                 try:
@@ -2093,9 +2134,41 @@ def main():
                 "keyword": args.keyword,
                 "channel": args.channel,
                 "workers": args.workers,
-                "proxy_count": len(proxy_list)
+                "proxy_count": len(proxy_list),
+                "headed": args.headed,
+                "headless": args.headless,
+                "unmute": args.unmute,
+                "min_percent": args.min_percent,
+                "max_percent": args.max_percent,
+                "direct": args.direct,
+                "sleep_between": args.sleep_between,
+                "proxy_file": args.proxy_file,
             }
-            start_web_dashboard(telemetry_q, host=args.web_host, port=args.web_port, initial_config=web_cfg)
+
+            class CLIProcessAdapter:
+                def __init__(self, s_event):
+                    self.stop_event = s_event
+
+                def is_running(self):
+                    return not self.stop_event.is_set()
+
+                def get_status(self):
+                    return "RUNNING" if not self.stop_event.is_set() else "STOPPED"
+
+                def stop(self):
+                    self.stop_event.set()
+
+                def start(self, override_config=None):
+                    return False
+
+            cli_adapter = CLIProcessAdapter(stop_event)
+            start_web_dashboard(
+                telemetry_q,
+                host=args.web_host,
+                port=args.web_port,
+                initial_config=web_cfg,
+                bot_controller=cli_adapter
+            )
         except Exception as e:
             safe_log("WEB", f"Gagal memulai Web Dashboard: {e}", YELLOW)
             telemetry_q = None

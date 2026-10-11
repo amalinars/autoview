@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AutoView • Live Worker Monitor & Terminal</title>
+    <title>AutoView • Live Studio Monitor & Controller</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
             --bg-base: #090c13;
@@ -109,7 +109,7 @@
         }
 
         .brand-text h1 {
-            font-size: 21px;
+            font-size: 20px;
             font-weight: 800;
             letter-spacing: -0.02em;
             display: flex;
@@ -118,15 +118,18 @@
         }
 
         .brand-text h1 span {
-            background: linear-gradient(90deg, #818cf8, #22d3ee);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--primary);
+            background: rgba(99, 102, 241, 0.12);
+            padding: 2px 8px;
+            border-radius: 6px;
+            border: 1px solid rgba(99, 102, 241, 0.2);
         }
 
         .brand-text p {
             font-size: 13px;
             color: var(--text-muted);
-            font-weight: 500;
             margin-top: 2px;
         }
 
@@ -137,84 +140,153 @@
             flex-wrap: wrap;
         }
 
+        /* Master Status Badge */
+        .master-status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 7px 16px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.03em;
+            transition: all 0.25s ease;
+            text-transform: uppercase;
+        }
+
+        .master-status-pill.running {
+            background: rgba(16, 185, 129, 0.15);
+            color: #34d399;
+            border: 1px solid rgba(16, 185, 129, 0.35);
+            box-shadow: 0 0 16px rgba(16, 185, 129, 0.2);
+        }
+
+        .master-status-pill.stopped {
+            background: rgba(100, 116, 139, 0.15);
+            color: #94a3b8;
+            border: 1px solid rgba(100, 116, 139, 0.3);
+        }
+
+        .master-status-pill.stopping {
+            background: rgba(245, 158, 11, 0.15);
+            color: #fbbf24;
+            border: 1px solid rgba(245, 158, 11, 0.35);
+        }
+
+        .master-status-pill.idle {
+            background: rgba(6, 182, 212, 0.15);
+            color: #22d3ee;
+            border: 1px solid rgba(6, 182, 212, 0.35);
+        }
+
         /* Action Buttons */
         .btn-action {
             display: inline-flex;
             align-items: center;
-            gap: 8px;
-            padding: 8px 16px;
-            border-radius: 10px;
-            font-size: 13px;
-            font-weight: 600;
-            font-family: var(--font-sans);
+            gap: 7px;
+            padding: 7px 14px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 700;
             cursor: pointer;
-            transition: all 0.2s ease;
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            background: rgba(255, 255, 255, 0.05);
-            color: var(--text-main);
-        }
-
-        .btn-action:hover {
-            background: rgba(255, 255, 255, 0.1);
-            transform: translateY(-1px);
-        }
-
-        .btn-action.btn-refresh {
-            background: linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(6, 182, 212, 0.25));
-            border-color: rgba(99, 102, 241, 0.5);
-            color: #e0e7ff;
-        }
-
-        .btn-action.btn-refresh:hover {
-            background: linear-gradient(135deg, rgba(99, 102, 241, 0.4), rgba(6, 182, 212, 0.4));
-            box-shadow: 0 4px 14px var(--primary-glow);
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            border: 1px solid transparent;
+            outline: none;
+            user-select: none;
         }
 
         .btn-action:disabled {
-            opacity: 0.5;
+            opacity: 0.45;
             cursor: not-allowed;
-            transform: none;
+            transform: none !important;
+            box-shadow: none !important;
+        }
+
+        .btn-start {
+            background: linear-gradient(135deg, #10b981, #059669);
+            color: #ffffff;
+            border: 1px solid rgba(16, 185, 129, 0.4);
+            box-shadow: 0 2px 10px rgba(16, 185, 129, 0.25);
+        }
+
+        .btn-start:hover:not(:disabled) {
+            box-shadow: 0 4px 18px rgba(16, 185, 129, 0.4);
+            transform: translateY(-1px);
+        }
+
+        .btn-stop {
+            background: linear-gradient(135deg, #ef4444, #dc2626);
+            color: #ffffff;
+            border: 1px solid rgba(239, 68, 68, 0.4);
+            box-shadow: 0 2px 10px rgba(239, 68, 68, 0.25);
+        }
+
+        .btn-stop:hover:not(:disabled) {
+            box-shadow: 0 4px 18px rgba(239, 68, 68, 0.4);
+            transform: translateY(-1px);
+        }
+
+        .btn-refresh {
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-main);
+            border: 1px solid var(--border-subtle);
+        }
+
+        .btn-refresh:hover:not(:disabled) {
+            background: rgba(255, 255, 255, 0.09);
+            border-color: rgba(255, 255, 255, 0.2);
+            transform: translateY(-1px);
+        }
+
+        .btn-config {
+            background: rgba(99, 102, 241, 0.1);
+            color: #818cf8;
+            border: 1px solid rgba(99, 102, 241, 0.25);
+        }
+
+        .btn-config:hover {
+            background: rgba(99, 102, 241, 0.18);
+            border-color: rgba(99, 102, 241, 0.4);
+            transform: translateY(-1px);
         }
 
         .status-badge-live {
-            display: flex;
+            display: inline-flex;
             align-items: center;
-            gap: 8px;
-            padding: 7px 14px;
-            border-radius: 9999px;
+            gap: 7px;
             background: rgba(16, 185, 129, 0.1);
-            border: 1px solid rgba(16, 185, 129, 0.3);
-            color: #34d399;
-            font-size: 12px;
+            border: 1px solid rgba(16, 185, 129, 0.2);
+            padding: 6px 12px;
+            border-radius: 999px;
+            font-size: 11px;
             font-weight: 700;
-            letter-spacing: 0.05em;
-            text-transform: uppercase;
-        }
-
-        .status-badge-live .pulse-dot {
-            width: 8px;
-            height: 8px;
-            background-color: #10b981;
-            border-radius: 50%;
-            box-shadow: 0 0 10px #10b981;
-            animation: pulse 1.8s infinite;
+            color: var(--success);
         }
 
         .status-badge-live.reconnecting {
             background: rgba(245, 158, 11, 0.1);
-            border-color: rgba(245, 158, 11, 0.3);
-            color: #fbbf24;
+            border-color: rgba(245, 158, 11, 0.2);
+            color: var(--warning);
+        }
+
+        .pulse-dot {
+            width: 8px;
+            height: 8px;
+            background-color: var(--success);
+            border-radius: 50%;
+            box-shadow: 0 0 8px var(--success);
+            animation: pulse 1.8s infinite;
         }
 
         .status-badge-live.reconnecting .pulse-dot {
-            background-color: #f59e0b;
-            box-shadow: 0 0 10px #f59e0b;
+            background-color: var(--warning);
+            box-shadow: 0 0 8px var(--warning);
         }
 
         @keyframes pulse {
-            0% { transform: scale(0.9); opacity: 0.7; }
-            50% { transform: scale(1.3); opacity: 1; }
-            100% { transform: scale(0.9); opacity: 0.7; }
+            0% { transform: scale(0.95); opacity: 0.8; }
+            50% { transform: scale(1.2); opacity: 1; }
+            100% { transform: scale(0.95); opacity: 0.8; }
         }
 
         /* Chips Bar */
@@ -222,7 +294,7 @@
             display: flex;
             align-items: center;
             gap: 10px;
-            margin-top: 18px;
+            margin-top: 14px;
             flex-wrap: wrap;
         }
 
@@ -230,18 +302,17 @@
             display: inline-flex;
             align-items: center;
             gap: 6px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border-subtle);
             padding: 5px 12px;
             border-radius: 8px;
-            background: rgba(255, 255, 255, 0.04);
-            border: 1px solid rgba(255, 255, 255, 0.06);
             font-size: 12px;
             color: var(--text-muted);
-            font-weight: 500;
         }
 
         .chip-item b {
             color: var(--text-main);
-            font-weight: 700;
+            font-weight: 600;
         }
 
         /* Metrics Row */
@@ -249,23 +320,23 @@
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
             gap: 16px;
-            margin: 24px 0 28px;
+            margin-top: 20px;
         }
 
         .metric-card {
             background: var(--bg-card);
             border: 1px solid var(--border-subtle);
-            backdrop-filter: blur(12px);
             border-radius: 16px;
             padding: 18px 20px;
             display: flex;
             align-items: center;
             gap: 16px;
-            transition: all 0.2s ease;
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            backdrop-filter: blur(12px);
         }
 
         .metric-card:hover {
-            border-color: var(--border-focus);
+            border-color: rgba(255, 255, 255, 0.15);
             transform: translateY(-2px);
             background: var(--bg-card-hover);
         }
@@ -277,99 +348,103 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 20px;
+            font-size: 18px;
             flex-shrink: 0;
         }
 
-        .metric-icon.blue { background: rgba(99, 102, 241, 0.15); color: #818cf8; }
-        .metric-icon.green { background: rgba(16, 185, 129, 0.15); color: #34d399; }
-        .metric-icon.amber { background: rgba(245, 158, 11, 0.15); color: #fbbf24; }
-        .metric-icon.cyan { background: rgba(6, 182, 212, 0.15); color: #22d3ee; }
-        .metric-icon.purple { background: rgba(168, 85, 247, 0.15); color: #c084fc; }
+        .metric-icon.green { background: rgba(16, 185, 129, 0.15); color: var(--success); }
+        .metric-icon.amber { background: rgba(245, 158, 11, 0.15); color: var(--warning); }
+        .metric-icon.blue { background: rgba(99, 102, 241, 0.15); color: var(--primary); }
+        .metric-icon.cyan { background: rgba(6, 182, 212, 0.15); color: var(--cyan); }
+        .metric-icon.purple { background: rgba(168, 85, 247, 0.15); color: var(--purple); }
 
         .metric-info {
             display: flex;
             flex-direction: column;
-            gap: 2px;
+            gap: 4px;
             overflow: hidden;
         }
 
         .metric-label {
-            font-size: 11px;
+            font-size: 12px;
+            font-weight: 600;
             color: var(--text-muted);
-            font-weight: 700;
             text-transform: uppercase;
-            letter-spacing: 0.05em;
+            letter-spacing: 0.04em;
         }
 
         .metric-value {
-            font-size: 22px;
+            font-size: 18px;
             font-weight: 800;
             color: var(--text-main);
-            font-feature-settings: "tnum";
+            font-family: var(--font-mono);
+            letter-spacing: -0.02em;
             white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
-        /* Section Title */
+        /* Worker Cards Grid Section */
         .section-header {
+            margin-top: 36px;
+            margin-bottom: 16px;
             display: flex;
             align-items: center;
             justify-content: space-between;
-            margin-bottom: 16px;
         }
 
         .section-title {
             font-size: 16px;
             font-weight: 700;
+            color: var(--text-main);
             display: flex;
             align-items: center;
-            gap: 8px;
-            color: var(--text-main);
+            gap: 10px;
         }
 
         .worker-count-tag {
-            background: rgba(255, 255, 255, 0.08);
-            padding: 2px 10px;
-            border-radius: 20px;
             font-size: 12px;
             font-weight: 600;
             color: var(--cyan);
+            background: rgba(6, 182, 212, 0.1);
+            padding: 2px 8px;
+            border-radius: 6px;
+            border: 1px solid rgba(6, 182, 212, 0.2);
         }
 
-        /* Worker Grid */
         #worker-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
-            gap: 20px;
-            margin-bottom: 32px;
+            gap: 18px;
         }
 
         /* Worker Card */
         .worker-card {
             background: var(--bg-card);
             border: 1px solid var(--border-subtle);
-            border-radius: 18px;
-            padding: 20px;
-            backdrop-filter: blur(14px);
-            transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+            border-radius: 16px;
+            padding: 18px 20px;
             display: flex;
             flex-direction: column;
-            gap: 16px;
+            gap: 14px;
+            transition: all 0.25s ease;
             position: relative;
-            overflow: hidden;
+            backdrop-filter: blur(8px);
         }
 
         .worker-card:hover {
-            border-color: rgba(99, 102, 241, 0.35);
+            border-color: rgba(255, 255, 255, 0.16);
+            transform: translateY(-2px);
             background: var(--bg-card-hover);
-            transform: translateY(-3px);
-            box-shadow: 0 12px 30px -10px rgba(0, 0, 0, 0.5);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
         }
 
         .worker-card-header {
             display: flex;
             align-items: center;
             justify-content: space-between;
+            gap: 8px;
+            flex-wrap: wrap;
         }
 
         .worker-id-group {
@@ -379,66 +454,94 @@
         }
 
         .worker-badge {
-            background: linear-gradient(135deg, #4f46e5, #06b6d4);
-            color: #ffffff;
+            font-size: 13px;
             font-weight: 800;
-            font-size: 12px;
-            padding: 3px 10px;
-            border-radius: 8px;
+            color: #89b4fa;
             font-family: var(--font-mono);
-            letter-spacing: 0.02em;
         }
 
         .worker-pid {
-            font-size: 12px;
+            font-size: 11px;
             color: var(--text-dim);
             font-family: var(--font-mono);
-            font-weight: 500;
+            background: rgba(255, 255, 255, 0.04);
+            padding: 2px 6px;
+            border-radius: 4px;
         }
 
-        /* State Badge */
+        .mode-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 10px;
+            font-weight: 700;
+            padding: 2px 7px;
+            border-radius: 5px;
+            letter-spacing: 0.03em;
+        }
+
+        .mode-pill.headed {
+            background: rgba(245, 158, 11, 0.12);
+            color: #fbbf24;
+            border: 1px solid rgba(245, 158, 11, 0.3);
+        }
+
+        .mode-pill.headless {
+            background: rgba(99, 102, 241, 0.12);
+            color: #818cf8;
+            border: 1px solid rgba(99, 102, 241, 0.3);
+        }
+
         .status-pill {
             font-size: 11px;
             font-weight: 700;
             padding: 4px 10px;
             border-radius: 999px;
-            letter-spacing: 0.04em;
-            text-transform: uppercase;
+            letter-spacing: 0.02em;
             display: inline-flex;
             align-items: center;
             gap: 6px;
-            transition: all 0.2s ease;
+        }
+
+        .status-pill.green {
+            background: rgba(16, 185, 129, 0.15);
+            color: #34d399;
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        .status-pill.amber {
+            background: rgba(245, 158, 11, 0.15);
+            color: #fbbf24;
+            border: 1px solid rgba(245, 158, 11, 0.3);
         }
 
         .status-pill.blue {
-            background: rgba(56, 189, 248, 0.12);
-            color: #38bdf8;
-            border: 1px solid rgba(56, 189, 248, 0.3);
-        }
-        .status-pill.green {
-            background: rgba(52, 211, 153, 0.12);
-            color: #34d399;
-            border: 1px solid rgba(52, 211, 153, 0.3);
-        }
-        .status-pill.amber {
-            background: rgba(251, 191, 36, 0.12);
-            color: #fbbf24;
-            border: 1px solid rgba(251, 191, 36, 0.3);
-        }
-        .status-pill.purple {
-            background: rgba(167, 139, 250, 0.12);
-            color: #a78bfa;
-            border: 1px solid rgba(167, 139, 250, 0.3);
-        }
-        .status-pill.red {
-            background: rgba(248, 113, 113, 0.12);
-            color: #f87171;
-            border: 1px solid rgba(248, 113, 113, 0.3);
+            background: rgba(99, 102, 241, 0.15);
+            color: #818cf8;
+            border: 1px solid rgba(99, 102, 241, 0.3);
         }
 
-        /* Video Info */
+        .status-pill.purple {
+            background: rgba(168, 85, 247, 0.15);
+            color: #c084fc;
+            border: 1px solid rgba(168, 85, 247, 0.3);
+        }
+
+        .status-pill.red {
+            background: rgba(239, 68, 68, 0.15);
+            color: #f87171;
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+
+        .status-pill.muted {
+            background: rgba(100, 116, 139, 0.15);
+            color: #94a3b8;
+            border: 1px solid rgba(100, 116, 139, 0.3);
+        }
+
+        /* Video Info Box */
         .video-box {
-            background: rgba(0, 0, 0, 0.3);
+            background: rgba(0, 0, 0, 0.25);
             border: 1px solid rgba(255, 255, 255, 0.04);
             border-radius: 12px;
             padding: 12px 14px;
@@ -450,50 +553,111 @@
         .video-box-header {
             display: flex;
             align-items: center;
-            gap: 6px;
+            gap: 8px;
             font-size: 11px;
+            font-weight: 700;
             color: var(--text-dim);
-            font-weight: 600;
             text-transform: uppercase;
-        }
-
-        .video-box-header svg {
-            width: 14px;
-            height: 14px;
-            fill: #ef4444;
+            letter-spacing: 0.04em;
         }
 
         .video-title {
             font-size: 13px;
-            font-weight: 600;
+            font-weight: 700;
             color: var(--text-main);
+            line-height: 1.4;
             display: -webkit-box;
             -webkit-line-clamp: 2;
             -webkit-box-orient: vertical;
             overflow: hidden;
-            line-height: 1.4;
-            min-height: 36px;
+            word-break: break-word;
         }
 
         .worker-details {
             font-size: 12px;
             color: var(--text-muted);
-            font-style: italic;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
-        /* Progress Section */
+        .video-meta-row {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+
+        .channel-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 11px;
+            font-weight: 700;
+            color: #89b4fa;
+            background: rgba(137, 180, 250, 0.12);
+            border: 1px solid rgba(137, 180, 250, 0.25);
+            padding: 2px 7px;
+            border-radius: 5px;
+        }
+
+        .video-url-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            color: #a6e3a1;
+            background: rgba(166, 227, 161, 0.12);
+            border: 1px solid rgba(166, 227, 161, 0.25);
+            padding: 2px 7px;
+            border-radius: 5px;
+            text-decoration: none;
+            transition: all 0.2s ease;
+        }
+
+        .video-url-link:hover {
+            background: rgba(166, 227, 161, 0.25);
+            color: #ffffff;
+            box-shadow: 0 0 8px rgba(166, 227, 161, 0.3);
+            text-decoration: underline;
+        }
+
+        .persona-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 10px;
+            color: var(--text-dim);
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            padding: 3px 8px;
+            border-radius: 6px;
+            max-width: 100%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .flag-emoji {
+            font-size: 14px;
+            line-height: 1;
+            display: inline-block;
+        }
+
+        /* Progress Bar Section */
         .progress-section {
             display: flex;
             flex-direction: column;
-            gap: 8px;
+            gap: 6px;
         }
 
         .progress-labels {
             display: flex;
+            align-items: center;
             justify-content: space-between;
-            font-size: 12px;
             font-family: var(--font-mono);
-            font-weight: 500;
+            font-size: 11px;
         }
 
         .progress-timer {
@@ -521,6 +685,18 @@
             transition: width 0.4s ease;
         }
 
+        .progress-bar-fill.fill-green {
+            background: linear-gradient(90deg, #10b981, #34d399);
+        }
+
+        .progress-bar-fill.fill-amber {
+            background: linear-gradient(90deg, #f59e0b, #fbbf24);
+        }
+
+        .progress-bar-fill.fill-blue {
+            background: linear-gradient(90deg, #6366f1, #818cf8);
+        }
+
         /* Card Footer */
         .worker-card-footer {
             display: flex;
@@ -530,6 +706,7 @@
             border-top: 1px solid rgba(255, 255, 255, 0.05);
             font-size: 12px;
             color: var(--text-muted);
+            gap: 8px;
         }
 
         .proxy-pill {
@@ -537,6 +714,7 @@
             align-items: center;
             gap: 6px;
             background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.05);
             padding: 4px 10px;
             border-radius: 6px;
             font-family: var(--font-mono);
@@ -548,23 +726,18 @@
             white-space: nowrap;
         }
 
-        .proxy-pill svg {
-            width: 12px;
-            height: 12px;
-            fill: var(--cyan);
-            flex-shrink: 0;
-        }
-
         .ads-badge {
             display: inline-flex;
             align-items: center;
             gap: 5px;
             font-size: 11px;
-            font-weight: 600;
-            color: var(--warning);
-            background: rgba(245, 158, 11, 0.1);
+            font-weight: 700;
+            color: #fab387;
+            background: rgba(250, 179, 135, 0.12);
+            border: 1px solid rgba(250, 179, 135, 0.25);
             padding: 3px 8px;
             border-radius: 6px;
+            white-space: nowrap;
         }
 
         /* Empty State */
@@ -583,15 +756,13 @@
             font-size: 14px;
         }
 
-        /* =====================================================================
-           LIVE TERMINAL & CONSOLE ACTIVITY LOG (MATCHING PYTHON GUI APP)
-           ===================================================================== */
+        /* Terminal Activity Log Panel */
         .terminal-panel {
             background: #090d16;
             border: 1px solid rgba(255, 255, 255, 0.1);
             border-radius: 16px;
             overflow: hidden;
-            margin-top: 10px;
+            margin-top: 36px;
             box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
         }
 
@@ -669,9 +840,6 @@
             background: rgba(255, 255, 255, 0.15);
             border-radius: 4px;
         }
-        .terminal-body::-webkit-scrollbar-thumb:hover {
-            background: rgba(255, 255, 255, 0.3);
-        }
 
         .log-line {
             display: flex;
@@ -703,7 +871,6 @@
             flex: 1;
         }
 
-        /* Color classes for log prefixes & messages */
         .color-cyan { color: #22d3ee; }
         .color-green { color: #34d399; }
         .color-blue { color: #818cf8; }
@@ -712,7 +879,126 @@
         .color-red { color: #f87171; }
         .color-purple { color: #c084fc; }
 
-        /* Toast Notification */
+        /* Config Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(8px);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 999;
+            padding: 20px;
+        }
+
+        .modal-card {
+            background: var(--bg-surface);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 18px;
+            width: 100%;
+            max-width: 580px;
+            padding: 24px;
+            box-shadow: 0 25px 60px rgba(0, 0, 0, 0.6);
+            animation: scaleIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        @keyframes scaleIn {
+            from { transform: scale(0.95); opacity: 0; }
+            to { transform: scale(1); opacity: 1; }
+        }
+
+        .modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+        }
+
+        .modal-title {
+            font-size: 16px;
+            font-weight: 800;
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 20px;
+            cursor: pointer;
+            padding: 4px;
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .form-group.full {
+            grid-column: 1 / -1;
+        }
+
+        .form-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-muted);
+        }
+
+        .form-input, .form-select {
+            background: rgba(0, 0, 0, 0.35);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: var(--text-main);
+            padding: 9px 12px;
+            border-radius: 8px;
+            font-size: 13px;
+            outline: none;
+            transition: border 0.2s;
+            font-family: inherit;
+        }
+
+        .form-input:focus, .form-select:focus {
+            border-color: var(--primary);
+        }
+
+        .form-check {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 4px;
+            font-size: 13px;
+            color: var(--text-main);
+            cursor: pointer;
+        }
+
+        .form-check input {
+            cursor: pointer;
+        }
+
+        .modal-actions {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 12px;
+            margin-top: 24px;
+            padding-top: 16px;
+            border-top: 1px solid var(--border-subtle);
+        }
+
+        /* Toast Box */
         #toast-box {
             position: fixed;
             bottom: 24px;
@@ -737,7 +1023,6 @@
             to { transform: translateY(0); opacity: 1; }
         }
 
-        /* Footer */
         footer {
             margin-top: auto;
             padding: 20px 32px;
@@ -751,7 +1036,8 @@
             .container { padding: 16px; }
             #worker-grid { grid-template-columns: 1fr; }
             .metrics-grid { grid-template-columns: repeat(2, 1fr); }
-            .header-meta { width: 100%; justify-content: space-between; }
+            .header-meta { width: 100%; justify-content: flex-start; }
+            .form-grid { grid-template-columns: 1fr; }
         }
     </style>
 </head>
@@ -767,14 +1053,26 @@
                     </svg>
                 </div>
                 <div class="brand-text">
-                    <h1>AutoView <span>Live Studio & Monitor</span></h1>
-                    <p id="target-subtitle">YouTube Multi-Process Isolated Engine • Hexa-Source Rolling Proxies</p>
+                    <h1>AutoView <span>Studio Monitor</span></h1>
+                    <p id="target-subtitle">YouTube Multi-Process Isolated Bot • Smart System Watch Lock</p>
                 </div>
             </div>
 
             <div class="header-meta">
-                <button id="btn-refresh-proxy" class="btn-action btn-refresh" title="Memicu pengambilan & verifikasi stok proxy baru di background">
-                    <span id="refresh-icon">🔄</span> Refresh Proxy Sekarang
+                <div id="master-status-badge" class="master-status-pill running">
+                    ● BERJALAN (RUNNING)
+                </div>
+                <button id="btn-start-bot" class="btn-action btn-start" title="Mulai sesi bot" disabled>
+                    🚀 Mulai Bot
+                </button>
+                <button id="btn-stop-bot" class="btn-action btn-stop" title="Hentikan seluruh proses bot">
+                    ⏹️ Hentikan Bot
+                </button>
+                <button id="btn-config" class="btn-action btn-config" title="Konfigurasi parameter bot">
+                    ⚙️ Pengaturan
+                </button>
+                <button id="btn-refresh-proxy" class="btn-action btn-refresh" title="Memicu auto-refill proxy">
+                    <span id="refresh-icon">🔄</span> Refresh Proxy
                 </button>
                 <div id="live-indicator" class="status-badge-live">
                     <span class="pulse-dot"></span>
@@ -787,8 +1085,9 @@
         <div class="chips-bar" id="chips-bar">
             <div class="chip-item">🔍 Keyword: <b id="chip-keyword">-</b></div>
             <div class="chip-item">🎯 Channel: <b id="chip-channel">-</b></div>
-            <div class="chip-item">📊 Mode: <b id="chip-target">-</b></div>
-            <div class="chip-item">🌐 Engine: <b>Hexa-Source (Geonode + ProxyScrape + Proxifly + TheSpeedX + IPLocate + Databay)</b></div>
+            <div class="chip-item">📊 Target: <b id="chip-target">-</b></div>
+            <div class="chip-item">🖥️ Mode: <b id="chip-mode">-</b></div>
+            <div class="chip-item">🌐 Engine: <b>Hexa-Source Rolling Proxies</b></div>
         </div>
 
         <!-- Metrics Row -->
@@ -802,10 +1101,10 @@
             </div>
 
             <div class="metric-card">
-                <div class="metric-icon amber">⚡</div>
+                <div class="metric-icon amber">🛡️</div>
                 <div class="metric-info">
                     <span class="metric-label">Ads Terlewati</span>
-                    <span id="metric-ads" class="metric-value">0 ads</span>
+                    <span id="metric-ads" class="metric-value">0 Iklan Di-skip</span>
                 </div>
             </div>
 
@@ -813,7 +1112,7 @@
                 <div class="metric-icon blue">⚙</div>
                 <div class="metric-info">
                     <span class="metric-label">Worker Aktif</span>
-                    <span id="metric-workers" class="metric-value">0</span>
+                    <span id="metric-workers" class="metric-value">0 Worker</span>
                 </div>
             </div>
 
@@ -870,6 +1169,58 @@
         </div>
     </div>
 
+    <!-- Configuration Modal -->
+    <div id="config-modal" class="modal-overlay">
+        <div class="modal-card">
+            <div class="modal-header">
+                <div class="modal-title">⚙️ Konfigurasi Parameter Bot</div>
+                <button id="btn-close-modal" class="modal-close">&times;</button>
+            </div>
+            <form id="config-form" class="form-grid">
+                <div class="form-group">
+                    <label class="form-label">Jumlah Worker (OS Processes)</label>
+                    <input type="number" id="cfg-workers" class="form-input" min="1" max="25" value="3">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Target View</label>
+                    <input type="number" id="cfg-batch" class="form-input" min="1" max="5000" value="50">
+                </div>
+                <div class="form-group full">
+                    <label class="form-check">
+                        <input type="checkbox" id="cfg-infinite">
+                        <span>Mode Unlimited (24 Jam Nonstop / Infinite)</span>
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Keyword Pencarian</label>
+                    <input type="text" id="cfg-keyword" class="form-input" value="horrornologi">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Target Channel</label>
+                    <input type="text" id="cfg-channel" class="form-input" value="horrornologi">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Tampilan Browser</label>
+                    <select id="cfg-browser-mode" class="form-select">
+                        <option value="headless">⚡ Headless (Ringan & Cepat)</option>
+                        <option value="headed">👁️ Headed (Tampak Jendela)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Koneksi Proxy</label>
+                    <select id="cfg-proxy-mode" class="form-select">
+                        <option value="proxy">🌐 Hexa-Source Rolling Proxies</option>
+                        <option value="direct">⚡ Direct (Tanpa Proxy)</option>
+                    </select>
+                </div>
+                <div class="modal-actions full">
+                    <button type="button" id="btn-cancel-modal" class="btn-action btn-refresh">Batal</button>
+                    <button type="submit" id="btn-save-start" class="btn-action btn-start">💾 Simpan & Mulai Bot</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <div id="toast-box">Notification message</div>
 
     <footer>
@@ -893,6 +1244,9 @@
         let uptimeTimer = null;
         let autoScroll = true;
         let totalLogsCount = 0;
+        let lastKnownAds = 0;
+        let lastKnownViews = 0;
+        let currentBotStatus = 'RUNNING';
 
         function showToast(msg) {
             const box = document.getElementById('toast-box');
@@ -900,20 +1254,55 @@
             box.style.display = 'flex';
             setTimeout(() => {
                 box.style.display = 'none';
-            }, 3000);
+            }, 3200);
+        }
+
+        function updateBotStatusUI(status) {
+            currentBotStatus = (status || 'IDLE').toUpperCase();
+            const badge = document.getElementById('master-status-badge');
+            const btnStart = document.getElementById('btn-start-bot');
+            const btnStop = document.getElementById('btn-stop-bot');
+
+            if (currentBotStatus === 'RUNNING') {
+                badge.className = 'master-status-pill running';
+                badge.textContent = '● BERJALAN (RUNNING)';
+                btnStart.disabled = true;
+                btnStop.disabled = false;
+            } else if (currentBotStatus === 'STOPPING') {
+                badge.className = 'master-status-pill stopping';
+                badge.textContent = '● MENGHENTIKAN...';
+                btnStart.disabled = true;
+                btnStop.disabled = true;
+            } else if (currentBotStatus === 'STOPPED') {
+                badge.className = 'master-status-pill stopped';
+                badge.textContent = '● BERHENTI (STOPPED)';
+                btnStart.disabled = false;
+                btnStop.disabled = true;
+            } else {
+                badge.className = 'master-status-pill idle';
+                badge.textContent = '● SIAP (IDLE)';
+                btnStart.disabled = false;
+                btnStop.disabled = true;
+            }
         }
 
         function updateSummary(summary) {
             if (!summary) return;
 
-            const target = summary.is_infinite ? 'Tak Terbatas (∞)' : summary.batch_target;
+            // Stable non-decreasing metric defense
+            const rawViews = summary.total_views || 0;
+            const rawAds = summary.total_ads_skipped || 0;
+            if (rawViews > lastKnownViews) lastKnownViews = rawViews;
+            if (rawAds > lastKnownAds) lastKnownAds = rawAds;
+
+            const target = summary.is_infinite ? 'Tak Terbatas' : summary.batch_target;
             const pct = (!summary.is_infinite && summary.batch_target > 0)
-                ? ` (${Math.round((summary.total_views / summary.batch_target) * 100)}%)`
+                ? ` (${Math.round((lastKnownViews / summary.batch_target) * 100)}%)`
                 : '';
-            document.getElementById('metric-views').textContent = `${summary.total_views || 0} / ${target}${pct}`;
-            document.getElementById('metric-ads').textContent = `${summary.total_ads_skipped || 0} ads`;
-            document.getElementById('metric-workers').textContent = summary.active_workers || 0;
-            document.getElementById('metric-proxies').textContent = `${summary.active_proxies || 0} Aktif`;
+            document.getElementById('metric-views').textContent = `${lastKnownViews} / ${target}${pct}`;
+            document.getElementById('metric-ads').textContent = `${lastKnownAds} Iklan Di-skip`;
+            document.getElementById('metric-workers').textContent = `${summary.active_workers || 0} Worker`;
+            document.getElementById('metric-proxies').textContent = summary.direct ? 'Direct' : `${summary.active_proxies || 0} Aktif`;
 
             if (summary.keyword) {
                 document.getElementById('chip-keyword').textContent = `"${summary.keyword}"`;
@@ -922,6 +1311,9 @@
                 document.getElementById('chip-channel').textContent = `@${summary.channel}`;
             }
             document.getElementById('chip-target').textContent = summary.is_infinite ? 'Infinite (∞)' : `${summary.batch_target} Views`;
+            document.getElementById('chip-mode').textContent = summary.mode === 'HEADED' ? '👁️ Headed' : '⚡ Headless';
+
+            updateBotStatusUI(summary.bot_status);
 
             localUptimeBase = summary.uptime_seconds || 0;
             renderUptime();
@@ -933,8 +1325,10 @@
 
         if (!uptimeTimer) {
             uptimeTimer = setInterval(() => {
-                localUptimeBase += 1;
-                renderUptime();
+                if (currentBotStatus === 'RUNNING') {
+                    localUptimeBase += 1;
+                    renderUptime();
+                }
             }, 1000);
         }
 
@@ -955,6 +1349,11 @@
                 const w = workers[id];
                 let card = document.getElementById(`worker-card-${id}`);
 
+                const modeStr = (w.mode || 'HEADLESS').toUpperCase();
+                const isHeaded = modeStr === 'HEADED';
+                const modeClass = isHeaded ? 'headed' : 'headless';
+                const modeLabel = isHeaded ? '👁️ HEADED' : '⚡ HEADLESS';
+
                 if (!card) {
                     card = document.createElement('div');
                     card.id = `worker-card-${id}`;
@@ -962,20 +1361,32 @@
                     card.innerHTML = `
                         <div class="worker-card-header">
                             <div class="worker-id-group">
-                                <span class="worker-badge">#${String(id).padStart(2, '0')}</span>
+                                <span class="worker-badge">Worker #${String(id).padStart(2, '0')}</span>
                                 <span class="worker-pid" id="pid-${id}">PID: ${w.pid || '-'}</span>
+                                <span class="mode-pill ${modeClass}" id="mode-${id}">${modeLabel}</span>
                             </div>
                             <span class="status-pill ${w.status_color || 'blue'}" id="status-${id}">
-                                ${w.status || 'SIAP'}
+                                ${w.status_display || w.status || 'SIAP'}
                             </span>
                         </div>
                         <div class="video-box">
-                            <div class="video-box-header">
-                                <svg viewBox="0 0 24 24"><path d="M10 15l5.19-3L10 9v6m11.56-7.83c.13.47.22 1.1.28 1.9.07.8.1 1.49.1 2.09L22 12c0 2.19-.16 3.8-.44 4.83-.25.9-.83 1.48-1.73 1.73-.47.13-1.33.22-2.65.28-1.3.07-2.49.1-3.59.1L12 22c-4.19 0-6.8-.16-7.83-.44-.9-.25-1.48-.83-1.73-1.73-.13-.47-.22-1.1-.28-1.9-.07-.8-.1-1.49-.1-2.09L2 12c0-2.19.16-3.8.44-4.83.25-.9.83-1.48 1.73-1.73z"/></svg>
-                                <span>Sedang Diputar</span>
+                            <div class="video-box-header" style="justify-content: space-between;">
+                                <div style="display:flex; align-items:center; gap:6px;">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M10 15l5.19-3L10 9v6m11.56-7.83c.13.47.22 1.1.28 1.9.07.8.1 1.49.1 2.09L22 12c0 2.19-.16 3.8-.44 4.83-.25.9-.83 1.48-1.73 1.73-.47.13-1.33.22-2.65.28-1.3.07-2.49.1-3.59.1L12 22c-4.19 0-6.8-.16-7.83-.44-.9-.25-1.48-.83-1.73-1.73-.13-.47-.22-1.1-.28-1.9-.07-.8-.1-1.49-.1-2.09L2 12c0-2.19.16-3.8.44-4.83.25-.9.83-1.48 1.73-1.73z"/></svg>
+                                    <span>Sedang Diputar</span>
+                                </div>
+                                <div class="video-meta-row">
+                                    <span class="channel-pill" id="channel-${id}">🎯 @${w.channel || 'horrornologi'}</span>
+                                    <a href="${w.video_url || '#'}" target="_blank" rel="noopener noreferrer" class="video-url-link" id="vlink-${id}" style="${w.video_url ? '' : 'display:none;'}">
+                                        🔗 Buka Video
+                                    </a>
+                                </div>
                             </div>
-                            <div class="video-title" id="title-${id}">${w.video_title || 'Belum memilih video...'}</div>
+                            <div class="video-title" id="title-${id}">${w.video_title ? '🎬 ' + w.video_title : 'Menunggu tugas pencarian...'}</div>
                             <div class="worker-details" id="details-${id}">${w.details || '-'}</div>
+                            <div class="persona-pill" id="persona-${id}" title="${w.persona || ''}">
+                                🎭 ${w.persona || 'Menunggu identitas stealth persona...'}
+                            </div>
                         </div>
                         <div class="progress-section">
                             <div class="progress-labels">
@@ -983,16 +1394,16 @@
                                 <span class="progress-pct" id="pct-${id}">0.0%</span>
                             </div>
                             <div class="progress-bar-track">
-                                <div class="progress-bar-fill" id="bar-${id}"></div>
+                                <div class="progress-bar-fill fill-green" id="bar-${id}"></div>
                             </div>
                         </div>
                         <div class="worker-card-footer">
                             <div class="proxy-pill" id="proxy-${id}" title="${w.proxy || 'Direct'}">
-                                <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
-                                <span>${w.proxy || 'Direct'}</span>
+                                <span class="flag-emoji" id="flag-${id}">${w.country_flag || (w.proxy && w.proxy !== 'Direct' ? '🌍' : '🌐')}</span>
+                                <span id="proxy-txt-${id}">${w.proxy_display || w.proxy || 'Direct'}</span>
                             </div>
                             <div class="ads-badge" id="ads-${id}">
-                                ⚡ ${w.ads_skipped || 0} Ads
+                                🛡️ ${w.ads_skipped || 0} Iklan Di-skip
                             </div>
                         </div>
                     `;
@@ -1004,41 +1415,83 @@
 
                 const statusEl = document.getElementById(`status-${id}`);
                 if (statusEl) {
-                    statusEl.textContent = w.status || 'SIAP';
+                    statusEl.textContent = w.status_display || w.status || 'SIAP';
                     statusEl.className = `status-pill ${w.status_color || 'blue'}`;
                 }
 
                 const titleEl = document.getElementById(`title-${id}`);
-                if (titleEl && w.video_title) titleEl.textContent = w.video_title;
+                if (titleEl) {
+                    titleEl.textContent = w.video_title ? `🎬 ${w.video_title}` : 'Menunggu tugas pencarian...';
+                }
 
                 const detailsEl = document.getElementById(`details-${id}`);
                 if (detailsEl) detailsEl.textContent = w.details || '-';
 
+                const channelEl = document.getElementById(`channel-${id}`);
+                if (channelEl && w.channel) channelEl.textContent = `🎯 @${w.channel}`;
+
+                const vlinkEl = document.getElementById(`vlink-${id}`);
+                if (vlinkEl) {
+                    if (w.video_url && w.video_url.startsWith('http')) {
+                        vlinkEl.href = w.video_url;
+                        vlinkEl.style.display = 'inline-flex';
+                    } else {
+                        vlinkEl.style.display = 'none';
+                    }
+                }
+
+                const personaEl = document.getElementById(`persona-${id}`);
+                if (personaEl) {
+                    personaEl.textContent = `🎭 ${w.persona || 'Menunggu identitas stealth persona...'}`;
+                    personaEl.title = w.persona || '';
+                }
+
                 const timerEl = document.getElementById(`timer-${id}`);
                 if (timerEl) {
                     const elapsedStr = formatTime(w.elapsed_sec || 0);
-                    const durStr = formatTime(w.duration_sec || 0);
-                    timerEl.textContent = `${elapsedStr} / ${durStr}`;
+                    const targetStr = formatTime(w.duration_sec || 0);
+                    const curPlayStr = formatTime(w.current_play_time || 0);
+                    const totDurStr = formatTime(w.total_duration || 0);
+                    const pctVal = Math.min(100.0, Math.max(0.0, w.percent || 0.0));
+                    if (w.current_play_time && w.total_duration) {
+                        timerEl.textContent = `▶ ${curPlayStr}/${totDurStr} • ${elapsedStr}/${targetStr} (${pctVal.toFixed(1)}%)`;
+                    } else {
+                        timerEl.textContent = `${elapsedStr} / ${targetStr} (${pctVal.toFixed(1)}%)`;
+                    }
                 }
 
                 const pctEl = document.getElementById(`pct-${id}`);
                 const barEl = document.getElementById(`bar-${id}`);
                 const pctVal = Math.min(100.0, Math.max(0.0, w.percent || 0.0));
                 if (pctEl) pctEl.textContent = `${pctVal.toFixed(1)}%`;
-                if (barEl) barEl.style.width = `${pctVal}%`;
+                if (barEl) {
+                    barEl.style.width = `${pctVal}%`;
+                    const col = w.status_color || 'green';
+                    barEl.className = `progress-bar-fill ${col === 'green' ? 'fill-green' : (col === 'amber' ? 'fill-amber' : 'fill-blue')}`;
+                }
 
                 const proxyEl = document.getElementById(`proxy-${id}`);
+                const flagEl = document.getElementById(`flag-${id}`);
+                const proxyTxtEl = document.getElementById(`proxy-txt-${id}`);
+                if (flagEl) {
+                    flagEl.textContent = w.country_flag || (w.proxy && w.proxy !== 'Direct' ? '🌍' : '🌐');
+                }
+                if (proxyTxtEl) {
+                    proxyTxtEl.textContent = w.proxy_display || w.proxy || 'Direct';
+                }
                 if (proxyEl && w.proxy) {
-                    proxyEl.title = w.proxy;
-                    proxyEl.querySelector('span').textContent = w.proxy;
+                    proxyEl.title = `${w.country ? '[' + w.country + '] ' : ''}${w.proxy}`;
                 }
 
                 const adsEl = document.getElementById(`ads-${id}`);
-                if (adsEl) adsEl.textContent = `⚡ ${w.ads_skipped || 0} Ads`;
+                if (adsEl) {
+                    const workerAds = w.ads_skipped || 0;
+                    adsEl.textContent = `🛡️ ${workerAds} Iklan Di-skip`;
+                }
             });
         }
 
-        /* Terminal Logging Support */
+        /* Terminal Logging */
         function appendLog(log) {
             if (!log) return;
             const term = document.getElementById('terminal-body');
@@ -1047,12 +1500,12 @@
 
             let prefixClass = 'color-cyan';
             const p = (log.prefix || '').toUpperCase();
-            if (p.includes('PROXIES') || p.includes('HYBRID') || p.includes('OK')) prefixClass = 'color-green';
-            else if (p.includes('WORKER')) prefixClass = 'color-blue';
-            else if (p.includes('LOCK')) prefixClass = 'color-amber';
+            if (p.includes('PROXIES') || p.includes('PROGRESS') || p.includes('OK')) prefixClass = 'color-green';
+            else if (p.includes('BOT') || p.includes('INIT')) prefixClass = 'color-cyan';
+            else if (p.includes('PROCESS') || p.includes('WORKER')) prefixClass = 'color-blue';
+            else if (p.includes('LOCK')) prefixClass = 'color-purple';
             else if (p.includes('WARN')) prefixClass = 'color-yellow';
             else if (p.includes('ERROR') || p.includes('GAGAL')) prefixClass = 'color-red';
-            else if (p.includes('PROGRESS')) prefixClass = 'color-green';
 
             line.innerHTML = `
                 <span class="log-ts">[${log.timestamp || '00:00:00'}]</span>
@@ -1102,11 +1555,74 @@
                         document.getElementById('refresh-icon').textContent = '🔄';
                     }, 2500);
                 })
-                .catch(err => {
+                .catch(() => {
                     showToast('❌ Gagal memicu auto-refill proxy.');
                     btn.disabled = false;
                     document.getElementById('refresh-icon').textContent = '🔄';
                 });
+        });
+
+        document.getElementById('btn-stop-bot').addEventListener('click', function() {
+            if (!confirm('Hentikan seluruh proses bot?')) return;
+            this.disabled = true;
+            fetch('/api/stop', { method: 'POST' })
+                .then(r => r.json())
+                .then(res => {
+                    showToast('⏹️ Sinyal berhenti dikirim ke bot.');
+                    updateBotStatusUI('STOPPING');
+                })
+                .catch(() => {
+                    showToast('❌ Gagal menghentikan bot.');
+                    this.disabled = false;
+                });
+        });
+
+        document.getElementById('btn-start-bot').addEventListener('click', function() {
+            document.getElementById('config-modal').style.display = 'flex';
+        });
+
+        document.getElementById('btn-config').addEventListener('click', function() {
+            document.getElementById('config-modal').style.display = 'flex';
+        });
+
+        document.getElementById('btn-close-modal').addEventListener('click', () => {
+            document.getElementById('config-modal').style.display = 'none';
+        });
+
+        document.getElementById('btn-cancel-modal').addEventListener('click', () => {
+            document.getElementById('config-modal').style.display = 'none';
+        });
+
+        document.getElementById('config-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const payload = {
+                workers: parseInt(document.getElementById('cfg-workers').value) || 3,
+                batch_count: parseInt(document.getElementById('cfg-batch').value) || 50,
+                infinite: document.getElementById('cfg-infinite').checked,
+                keyword: document.getElementById('cfg-keyword').value.trim() || 'horrornologi',
+                channel: document.getElementById('cfg-channel').value.trim() || 'horrornologi',
+                headed: document.getElementById('cfg-browser-mode').value === 'headed',
+                direct: document.getElementById('cfg-proxy-mode').value === 'direct'
+            };
+
+            document.getElementById('config-modal').style.display = 'none';
+            showToast('🚀 Memulai proses bot...');
+
+            fetch('/api/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            })
+            .then(r => r.json())
+            .then(res => {
+                if (res.status === 'ok') {
+                    showToast('✔ Bot berhasil dimulai!');
+                    updateBotStatusUI('RUNNING');
+                } else {
+                    showToast(`⚠️ ${res.message}`);
+                }
+            })
+            .catch(() => showToast('❌ Gagal memulai bot.'));
         });
 
         function setConnectionState(isLive) {
@@ -1127,6 +1643,19 @@
             .then(data => {
                 updateSummary(data.summary);
                 renderWorkers(data.workers);
+                if (data.config) {
+                    if (data.config.workers) document.getElementById('cfg-workers').value = data.config.workers;
+                    if (data.config.batch_count) document.getElementById('cfg-batch').value = data.config.batch_count;
+                    if (data.config.infinite !== undefined) document.getElementById('cfg-infinite').checked = data.config.infinite;
+                    if (data.config.keyword) document.getElementById('cfg-keyword').value = data.config.keyword;
+                    if (data.config.channel) document.getElementById('cfg-channel').value = data.config.channel;
+                    if (data.config.headed !== undefined) {
+                        document.getElementById('cfg-browser-mode').value = data.config.headed ? 'headed' : 'headless';
+                    }
+                    if (data.config.direct !== undefined) {
+                        document.getElementById('cfg-proxy-mode').value = data.config.direct ? 'direct' : 'proxy';
+                    }
+                }
                 if (data.logs && data.logs.length > 0) {
                     loadLogsBatch(data.logs);
                 }
@@ -1176,7 +1705,7 @@
 
         connectSSE();
 
-        // 3. Fallback periodic sync every 2s
+        // 3. Fallback periodic sync every 3s
         setInterval(() => {
             fetch('/api/status')
                 .then(res => res.json())
@@ -1185,7 +1714,7 @@
                     renderWorkers(data.workers);
                 })
                 .catch(() => {});
-        }, 2000);
+        }, 3000);
     </script>
 </body>
 </html>

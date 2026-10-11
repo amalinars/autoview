@@ -61,25 +61,37 @@ Pastikan berada di folder `autoview` dan venv aktif (`source venv/bin/activate`)
 tmux new -s autoview
 ```
 
-### 1. Mode Unlimited (24 Jam Nonstop - Direkomendasikan di VPS)
+### 1. Menjalankan Bot CLI (Otomatis Menjalankan Web Dashboard)
+- **Mode Unlimited (24 Jam Nonstop - Direkomendasikan di VPS):**
 ```bash
 python3 youtube_search.py -w 3 --infinite --keyword "horrornologi"
 ```
-
-### 2. Mode Target Jumlah View (Misal 50 View)
+- **Mode Target Jumlah View (Misal 50 View):**
 ```bash
 python3 youtube_search.py -w 3 -b 50 --keyword "horrornologi"
 ```
-
-### 3. Mode Custom Channel & Parameter Tambahan
+- **Mode Custom Channel & Parameter Tambahan:**
 ```bash
 python3 youtube_search.py -w 4 --infinite --keyword "video viral" --channel "namachannel"
+```
+
+### 2. Menjalankan Langsung via Web Studio CLI (`web_dashboard.py`)
+Konsep eksekusi Web Dashboard CLI 100% identik dengan Python Desktop GUI (`gui_app.py`):
+```bash
+python3 web_dashboard.py -w 3 --infinite --keyword "horrornologi"
 ```
 
 *Setelah bot berjalan di tmux, tekan **`Ctrl + B`** lalu **`D`** untuk melepas terminal. Kamu bisa menutup terminal / mematikan laptop.*
 
 ---
 
-## 🌐 Memantau Live Web Dashboard
+## 🌐 Memantau & Mengontrol Live Web Studio
 Buka browser di HP atau laptop kamu:
 👉 **`http://IP_VPS_KAMU:5000`**
+
+Fitur Web Studio kini memiliki paritas penuh dengan Python Native GUI:
+- **Master Status Badge**: Indikator status master (`● BERJALAN (RUNNING)`, `● BERHENTI (STOPPED)`, `● SIAP (IDLE)`).
+- **Kontrol Tombol Langsung**: Mulai Bot (`🚀 Mulai Bot`), Hentikan Bot (`⏹️ Hentikan Bot`), Ubah Parameter (`⚙️ Pengaturan`), dan Refresh Proxy (`🔄 Refresh Proxy`).
+- **Worker Card Detail**: Menampilkan Worker ID, PID proses OS, Mode (`👁️ HEADED` / `⚡ HEADLESS`), Status dinamis (`🟢 MENONTON (LOCKED)`, `🟡 MENCARI VIDEO`, dll), Proxy terpilih, serta durasi tonton.
+- **Metrik Ads Stabil**: Pelacakan jumlah iklan kumulatif (monotonik non-decreasing), tidak akan pernah turun atau berfluktuasi saat pergantian video sesi worker.
+

@@ -31,6 +31,7 @@ from geonode_fetcher import (
     reset_proxy_storage,
 )
 from youtube_search import worker_process_main, load_proxies, safe_log
+from bot_controller import format_proxy_with_flag, resolve_proxy_country, country_code_to_flag
 
 # =====================================================================
 # THEME PALETTE (Catppuccin Mocha / VS Code Dark)
@@ -132,23 +133,33 @@ class WorkerCard(tk.Frame):
         self.lbl_mode = tk.Label(header_frame, text=mode_text, font=FONT_SMALL_BOLD, fg=mode_color, bg=C_CARD_BORDER, padx=8, pady=2)
         self.lbl_mode.pack(side="left", padx=(10, 0))
 
-        # Proxy pill on the right
-        self.lbl_proxy = tk.Label(header_frame, text="Proxy: Direct", font=FONT_SMALL_BOLD, fg=C_TEXT_MAIN, bg=C_CARD_BORDER, padx=8, pady=2)
+        # Proxy pill on the right (with flag icon)
+        self.lbl_proxy = tk.Label(header_frame, text="🌐 Direct", font=FONT_SMALL_BOLD, fg=C_TEXT_MAIN, bg=C_CARD_BORDER, padx=8, pady=2)
         self.lbl_proxy.pack(side="right")
 
         # Status badge
         self.lbl_status = tk.Label(header_frame, text="SIAP (IDLE)", font=FONT_SMALL_BOLD, fg=C_TEXT_DARK, bg=C_TEXT_MUTED, padx=8, pady=2)
         self.lbl_status.pack(side="right", padx=(0, 8))
 
-        # Row 2: Video Title & Target info
+        # Row 2: Video Title & Ads info
         info_frame = tk.Frame(self, bg=C_CARD_BG)
-        info_frame.pack(fill="x", expand=True, pady=(8, 4))
+        info_frame.pack(fill="x", expand=True, pady=(8, 2))
 
         self.lbl_video = tk.Label(info_frame, text="Menunggu tugas pencarian...", font=FONT_BOLD, fg=C_TEXT_MAIN, bg=C_CARD_BG, anchor="w")
         self.lbl_video.pack(side="left", fill="x", expand=True)
 
         self.lbl_ads = tk.Label(info_frame, text="🛡️ 0 Iklan", font=FONT_SMALL_BOLD, fg=C_PEACH, bg=C_CARD_BG)
         self.lbl_ads.pack(side="right")
+
+        # Row 2.5: Channel badge & Stealth Persona info
+        meta_frame = tk.Frame(self, bg=C_CARD_BG)
+        meta_frame.pack(fill="x", expand=True, pady=(0, 4))
+
+        self.lbl_channel = tk.Label(meta_frame, text="🎯 @horrornologi", font=FONT_SMALL_BOLD, fg=C_ACCENT_BLUE, bg=C_CARD_BG)
+        self.lbl_channel.pack(side="left")
+
+        self.lbl_persona = tk.Label(meta_frame, text="🎭 Persona: Menunggu...", font=FONT_SMALL, fg=C_TEXT_MUTED, bg=C_CARD_BG)
+        self.lbl_persona.pack(side="left", padx=(12, 0))
 
         # Row 3: Progress Bar & Duration timer
         prog_frame = tk.Frame(self, bg=C_CARD_BG)
@@ -157,19 +168,19 @@ class WorkerCard(tk.Frame):
         self.pbar = SmoothProgressBar(prog_frame, height=12, bg_color=C_CARD_BORDER, fill_color=C_SUCCESS)
         self.pbar.pack(side="left", fill="x", expand=True)
 
-        self.lbl_progress_text = tk.Label(prog_frame, text="00:00 / 00:00 (0%)", font=FONT_SMALL_BOLD, fg=C_TEXT_MUTED, bg=C_CARD_BG, width=18, anchor="e")
+        self.lbl_progress_text = tk.Label(prog_frame, text="00:00 / 00:00 (0%)", font=FONT_SMALL_BOLD, fg=C_TEXT_MUTED, bg=C_CARD_BG, width=28, anchor="e")
         self.lbl_progress_text.pack(side="right", padx=(10, 0))
 
     def update_pid(self, pid: int):
         self.lbl_pid.config(text=f"PID: {pid}")
 
-    def update_proxy(self, proxy_str: str):
-        short = proxy_str.replace("http://", "").replace("socks5://", "").replace("socks4://", "")
-        if "://" in proxy_str:
-            proto = proxy_str.split("://")[0].upper()
-            self.lbl_proxy.config(text=f"{proto}: {short}", fg=C_ACCENT_BLUE)
-        else:
-            self.lbl_proxy.config(text="Direct", fg=C_TEXT_MAIN)
+    def update_proxy(self, proxy_str: str, country_code: str = None, flag: str = None):
+        p_text = format_proxy_with_flag(proxy_str, country_code, flag)
+        self.lbl_proxy.config(text=p_text, fg=C_ACCENT_BLUE if "Direct" not in p_text else C_TEXT_MAIN)
+
+    def update_persona(self, persona: str):
+        display_persona = persona if len(persona) <= 52 else persona[:49] + "..."
+        self.lbl_persona.config(text=f"🎭 {display_persona}")
 
     def update_status(self, status: str, details: str = ""):
         s_upper = status.upper()
@@ -194,17 +205,23 @@ class WorkerCard(tk.Frame):
         if details and not self.lbl_video.cget("text").startswith("Horror"):
             self.lbl_video.config(text=details)
 
-    def update_video(self, title: str):
-        display_title = title if len(title) <= 65 else title[:62] + "..."
+    def update_video(self, title: str, channel: str = None):
+        display_title = title if len(title) <= 58 else title[:55] + "..."
         self.lbl_video.config(text=f"🎬 {display_title}", fg=C_TEXT_MAIN)
+        if channel:
+            self.lbl_channel.config(text=f"🎯 @{channel}")
 
     def update_ads(self, count: int):
         self.lbl_ads.config(text=f"🛡️ {count} Iklan Di-skip", fg=C_PEACH)
 
-    def update_watch_progress(self, elapsed: float, target: float, percent: float, total_dur: float, ads: int = 0):
+    def update_watch_progress(self, elapsed: float, target: float, percent: float, total_dur: float, ads: int = 0, cur_play: float = 0.0):
         ratio = (elapsed / target) if target > 0 else 0.0
         self.pbar.set_progress(ratio)
-        self.lbl_progress_text.config(text=f"{format_time(elapsed)} / {format_time(target)} ({percent:.1f}%)")
+        play_str = f"▶ {format_time(cur_play)}/{format_time(total_dur)}" if total_dur > 0 else ""
+        if play_str:
+            self.lbl_progress_text.config(text=f"{play_str} • {format_time(elapsed)}/{format_time(target)} ({percent:.0f}%)")
+        else:
+            self.lbl_progress_text.config(text=f"{format_time(elapsed)} / {format_time(target)} ({percent:.1f}%)")
         self.lbl_ads.config(text=f"🛡️ {ads} Iklan")
 
     def reset_for_session(self):
@@ -961,19 +978,29 @@ class YouTubeStudioGUI:
                         card.update_status("SIAP", data.get("details", ""))
 
                     elif event == "proxy_selected":
-                        card.update_proxy(data.get("proxy", "Direct"))
+                        card.update_proxy(
+                            data.get("proxy", "Direct"),
+                            country_code=data.get("country", ""),
+                            flag=data.get("country_flag", "")
+                        )
+                        if data.get("persona"):
+                            card.update_persona(data.get("persona", ""))
                         card.update_status("PROXY_TERPILIH", data.get("details", ""))
 
                     elif event == "status_change":
                         card.update_status(data.get("status", ""), data.get("details", ""))
 
                     elif event == "video_chosen":
-                        card.update_video(data.get("title", ""))
+                        card.update_video(data.get("title", ""), channel=data.get("channel"))
+                        if data.get("persona"):
+                            card.update_persona(data.get("persona", ""))
                         card.update_status(data.get("status", "NAVIGASI"), data.get("details", ""))
 
                     elif event == "watch_start":
                         card.reset_for_session()
-                        card.update_video(data.get("title", ""))
+                        card.update_video(data.get("title", ""), channel=data.get("channel"))
+                        if data.get("persona"):
+                            card.update_persona(data.get("persona", ""))
                         card.update_status("MENONTON", data.get("details", ""))
 
                     elif event == "watch_progress":
@@ -982,7 +1009,8 @@ class YouTubeStudioGUI:
                         pct = data.get("percent", 0.0)
                         tot = data.get("total_duration", 0.0)
                         ads = data.get("ad_count", 0)
-                        card.update_watch_progress(elapsed, target, pct, tot, ads)
+                        cur_play = data.get("current_play_time", 0.0)
+                        card.update_watch_progress(elapsed, target, pct, tot, ads, cur_play=cur_play)
 
                     elif event == "ad_skipped":
                         ad_cnt = data.get("ad_count", 0)
