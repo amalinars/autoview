@@ -21,6 +21,7 @@ import shutil
 import tempfile
 import multiprocessing
 import traceback
+import re
 from urllib.parse import urlparse
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
@@ -700,7 +701,8 @@ def find_channel_videos(page, target_chan: str = "horrornologi"):
             
             let durationSec = 0;
             if (durationStr) {
-                const parts = durationStr.split(':').map(p => parseInt(p, 10)).filter(p => !isNaN(p));
+                const cleanDur = durationStr.replace(/[^0-9:.]/g, '');
+                const parts = cleanDur.split(/[:.]/).map(p => parseInt(p, 10)).filter(p => !isNaN(p));
                 if (parts.length === 2) {
                     durationSec = parts[0] * 60 + parts[1];
                 } else if (parts.length === 3) {
@@ -732,6 +734,20 @@ def find_channel_videos(page, target_chan: str = "horrornologi"):
         register_discovered_videos(videos_info, target_chan)
 
     return videos_info or []
+
+def parse_duration_string(dur_str: str) -> int:
+    """Konversi format durasi string (e.g. '14:54', '14.54', '1:15:30', '1.15.30') ke detik."""
+    if not dur_str:
+        return 0
+    clean = re.sub(r'[^0-9:.]', '', dur_str)
+    parts = [int(p) for p in re.split(r'[:.]', clean) if p.isdigit()]
+    if len(parts) == 2:
+        return parts[0] * 60 + parts[1]
+    elif len(parts) == 3:
+        return parts[0] * 3600 + parts[1] * 60 + parts[2]
+    elif len(parts) == 1:
+        return parts[0]
+    return 0
 
 RECENT_VIDEOS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".recent_videos.json")
 VIDEO_STATS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "video_watch_stats.json")
@@ -848,46 +864,35 @@ def record_watched_video(video_href: str, title: str):
 def choose_channel_video(candidates: list, latest_ratio: float = 0.50) -> tuple[dict | None, str]:
     """
     Pilih video dari tab /videos channel Horrornologi dengan rasio 50/50:
-    - 50% Probabilitas: Memprioritaskan TOP video terbaru (urutan 1-3 teratas di tab Videos channel).
-      Di antara video-video terbaru tersebut, dipilih yang memiliki watch_count paling sedikit
-      agar tontonan terbagi rata di rilis-rilis terbaru.
-    - 50% Probabilitas: Memilih dari katalog channel lainnya menggunakan algoritma least-recent rotation
-      agar penonton tampak organik menjelajahi seluruh konten video Horrornologi.
+    - 50% Probabilitas: BENAR-BENAR video TERBARU (pasti index ke-0 di tab Videos channel).
+      Tidak diacak atau dirotasi, langsung mengambil video rilis paling anyar (index 0).
+    - 50% Probabilitas: Memilih dari katalog channel lainnya (index >= 1) menggunakan algoritma
+      least-recent rotation agar penonton tampak organik menjelajahi seluruh konten video Horrornologi.
     """
     if not candidates:
         return None, "NONE"
 
-    stats = load_video_stats()
-    recents = get_recent_videos()
-    recent_ids = {r.get("id") for r in recents}
-
-    def get_vid_id(c):
-        href = c.get("href", "")
-        return href.split("&")[0].split("=")[-1] if "v=" in href else href
-
-    # Tentukan apakah sesi ini memilih video terbaru atau katalog
+    # Tentukan apakah sesi ini memilih video terbaru (index 0) atau rotasi katalog (index >= 1)
     pick_latest = (random.random() < latest_ratio)
 
-    # Top pool: 1 - 3 video paling atas (terbaru)
-    top_n = min(3, len(candidates))
-    top_candidates = candidates[:top_n]
-    catalog_candidates = candidates[top_n:] if len(candidates) > top_n else candidates
-
-    if pick_latest and top_candidates:
-        def score_latest(c):
-            v_id = get_vid_id(c)
-            watch_cnt = stats.get(v_id, {}).get("watch_count", 0)
-            # Penalti ringan jika baru ditonton di sesi sebelumnya agar bergantian antar video baru
-            is_recent = 200 if v_id in recent_ids else 0
-            return watch_cnt + is_recent + random.uniform(0.0, 0.2)
-
-        sorted_top = sorted(top_candidates, key=score_latest)
-        return sorted_top[0], "LATEST_PRIORITY"
+    if pick_latest:
+        # 50% PASTI VIDEO TERBARU (INDEX 0) - Mutlak index 0, tanpa pengacakan atau penalti
+        return candidates[0], "LATEST_PRIORITY"
     else:
+        # 50% ROTASI KATALOG (Katalog lainnya, index >= 1)
+        catalog_candidates = candidates[1:] if len(candidates) > 1 else candidates
+        stats = load_video_stats()
+        recents = get_recent_videos()
+        recent_ids = {r.get("id") for r in recents}
+
+        def get_vid_id(c):
+            href = c.get("href", "")
+            return href.split("&")[0].split("=")[-1] if "v=" in href else href
+
         def score_catalog(c):
             v_id = get_vid_id(c)
             watch_cnt = stats.get(v_id, {}).get("watch_count", 0)
-            # Penalti ketat jika baru ditonton di 4 sesi terakhir
+            # Penalti ketat jika baru ditonton di sesi-sesi terakhir
             is_recent = 1000 if v_id in recent_ids else 0
             return watch_cnt + is_recent + random.uniform(0.0, 0.4)
 
@@ -921,7 +926,9 @@ def find_videos_on_channel_page(page, target_chan: str = "horrornologi") -> list
         const list = [];
         const seen = new Set();
         
-        const cards = document.querySelectorAll('yt-lockup-view-model, ytd-rich-item-renderer, ytd-grid-video-renderer');
+        // Scope ke container grid video di tab /videos agar urutan index 0 adalah video rilis paling anyar di kiri-atas
+        const container = document.querySelector('ytd-rich-grid-renderer #contents, ytd-two-column-browse-results-renderer #contents') || document;
+        const cards = container.querySelectorAll('ytd-rich-item-renderer, yt-lockup-view-model, ytd-grid-video-renderer');
         cards.forEach(card => {
             const watchLinks = card.querySelectorAll('a[href*="/watch?v="]');
             if (!watchLinks || watchLinks.length === 0) return;
@@ -936,14 +943,23 @@ def find_videos_on_channel_page(page, target_chan: str = "horrornologi") -> list
                 if (h.includes('/watch?v=')) {
                     href = h.split('&')[0];
                 }
-                if (t && t.length > 5 && !/^[0-9:]+$/.test(t)) {
+                // Deteksi timestamp durasi (format titik '14.54' atau titik dua '14:54') vs teks judul
+                if (t && t.length > 5 && !/^[0-9:.]+$/.test(t)) {
                     title = t;
-                } else if (/^[0-9:]+$/.test(t)) {
+                } else if (/^[0-9:.]+$/.test(t)) {
                     durStr = t;
                 }
             });
             
             if (!href || seen.has(href)) return;
+            
+            // Fallback judul dari elemen heading jika belum didapat dari tag link
+            if (!title) {
+                const titleEl = card.querySelector('#video-title, h3, .yt-lockup-metadata-view-model-wiz__title');
+                if (titleEl) {
+                    title = (titleEl.getAttribute('title') || titleEl.getAttribute('aria-label') || titleEl.innerText || '').trim();
+                }
+            }
             
             title = title.replace(/\\s+[0-9]+\\s+(minutes|detik|menit|hours|jam).*$/i, '').trim();
             title = title.replace(/\\n+/g, ' ').trim();
@@ -958,7 +974,9 @@ def find_videos_on_channel_page(page, target_chan: str = "horrornologi") -> list
             
             let durSec = 0;
             if (durStr) {
-                const parts = durStr.split(':').map(p => parseInt(p, 10)).filter(p => !isNaN(p));
+                // Parsing durasi mendukung separator titik dua ':' maupun titik '.' (format lokal YouTube Indonesia)
+                const cleanDur = durStr.replace(/[^0-9:.]/g, '');
+                const parts = cleanDur.split(/[:.]/).map(p => parseInt(p, 10)).filter(p => !isNaN(p));
                 if (parts.length === 2) durSec = parts[0] * 60 + parts[1];
                 else if (parts.length === 3) durSec = parts[0] * 3600 + parts[1] * 60 + parts[2];
             }
@@ -1030,7 +1048,7 @@ def navigate_to_channel_from_search(page, target_chan: str = "horrornologi") -> 
     # Pastikan berada di tab /videos
     if "/videos" not in curr_url:
         try:
-            tab_loc = page.locator("yt-tab-shape[tab-title='Videos'], tp-yt-paper-tab:has-text('Videos'), a[href*='/videos']").first
+            tab_loc = page.locator("yt-tab-shape:has-text('Video'), tp-yt-paper-tab:has-text('Video'), a[href*='/videos']").first
             if tab_loc.is_visible(timeout=1500):
                 tab_loc.click()
                 time.sleep(1.5)
@@ -1040,6 +1058,16 @@ def navigate_to_channel_from_search(page, target_chan: str = "horrornologi") -> 
         except Exception:
             page.goto(f"https://www.youtube.com/@{target}/videos", wait_until="domcontentloaded", timeout=20000)
             time.sleep(1.5)
+
+    # Pastikan katalog di tab /videos terurut berdasarkan 'Terbaru' (Latest) jika ada chip filter
+    try:
+        latest_chip = page.locator("yt-chip-cloud-chip-renderer:has-text('Terbaru'), yt-chip-cloud-chip-renderer:has-text('Latest'), chip-shape:has-text('Terbaru'), chip-shape:has-text('Latest')").first
+        if latest_chip.is_visible(timeout=500):
+            if latest_chip.get_attribute("aria-selected") == "false":
+                latest_chip.click()
+                time.sleep(0.8)
+    except Exception:
+        pass
 
     return target in (page.url or "").lower()
 
@@ -1845,8 +1873,12 @@ def worker_process_main(worker_id: int, args, proxy_list: list, success_counter,
                     safe_log(worker_name, f"❌ Gagal memilih video dari katalog @{target_chan}!", RED)
                     continue
 
-                mode_label = "🔥 50% Video Terbaru" if selection_mode == "LATEST_PRIORITY" else "🎲 50% Rotasi Katalog"
-                safe_log(worker_name, f"[{mode_label}] Terpilih: '{chosen_video['title'][:40]}...' [{chosen_video.get('duration_str', 'N/A')}] (dari {len(channel_videos)} video)", GREEN)
+                if selection_mode == "LATEST_PRIORITY":
+                    mode_label = "🔥 50% Video Terbaru (Index 0)"
+                    safe_log(worker_name, f"[{mode_label}] Terpilih Rilis Paling Anyar: '{chosen_video['title'][:40]}...' [{chosen_video.get('duration_str', 'N/A')}] (Index 0 dari {len(channel_videos)} video)", GREEN)
+                else:
+                    mode_label = "🎲 50% Rotasi Katalog"
+                    safe_log(worker_name, f"[{mode_label}] Terpilih: '{chosen_video['title'][:40]}...' [{chosen_video.get('duration_str', 'N/A')}] (dari {len(channel_videos)} video)", GREEN)
 
                 chosen_title = chosen_video["title"]
                 expected_dur = chosen_video.get("duration_sec", 0)

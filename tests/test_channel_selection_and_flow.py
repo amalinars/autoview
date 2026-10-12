@@ -7,6 +7,7 @@ import tempfile
 from youtube_search import (
     choose_channel_video,
     choose_least_recent_video,
+    parse_duration_string,
     generate_stealth_script,
     generate_unique_fingerprint,
 )
@@ -29,10 +30,11 @@ class TestChannelSelectionAndFlow(unittest.TestCase):
         mock_stats.return_value = {}
         mock_recents.return_value = []
 
-        # With latest_ratio=1.0, it must always pick from top 3
+        # With latest_ratio=1.0, it must strictly pick index 0 (the newest release)
         chosen, mode = choose_channel_video(self.mock_candidates, latest_ratio=1.0)
         self.assertEqual(mode, "LATEST_PRIORITY")
-        self.assertIn(chosen["href"], ["/watch?v=newest_1", "/watch?v=newest_2", "/watch?v=newest_3"])
+        self.assertEqual(chosen["href"], "/watch?v=newest_1")
+        self.assertEqual(chosen["title"], "Video Horrornologi #1 (Paling Baru)")
 
     @patch("youtube_search.load_video_stats")
     @patch("youtube_search.get_recent_videos")
@@ -40,25 +42,37 @@ class TestChannelSelectionAndFlow(unittest.TestCase):
         mock_stats.return_value = {}
         mock_recents.return_value = []
 
-        # With latest_ratio=0.0, it must pick from catalog (index >= 3)
+        # With latest_ratio=0.0, it must pick from the rest of the catalog (index >= 1)
         chosen, mode = choose_channel_video(self.mock_candidates, latest_ratio=0.0)
         self.assertEqual(mode, "CATALOG_ROTATION")
-        self.assertIn(chosen["href"], ["/watch?v=catalog_4", "/watch?v=catalog_5", "/watch?v=catalog_6"])
+        catalog_hrefs = [c["href"] for c in self.mock_candidates[1:]]
+        self.assertIn(chosen["href"], catalog_hrefs)
+        self.assertNotEqual(chosen["href"], "/watch?v=newest_1")
 
     @patch("youtube_search.load_video_stats")
     @patch("youtube_search.get_recent_videos")
-    def test_choose_channel_video_favors_least_watched_latest(self, mock_recents, mock_stats):
-        # newest_1 has been watched 10 times, newest_2 has 0 watches
+    def test_choose_channel_video_strictly_index_zero_regardless_of_history(self, mock_recents, mock_stats):
+        # Even if index 0 has high watch count and is in recents,
+        # latest priority branch MUST strictly pick index 0 without guessing or picking older ones
         mock_stats.return_value = {
-            "newest_1": {"watch_count": 10},
-            "newest_2": {"watch_count": 0},
-            "newest_3": {"watch_count": 5},
+            "newest_1": {"watch_count": 999},
         }
-        mock_recents.return_value = []
+        mock_recents.return_value = [{"id": "newest_1", "title": "Video #1", "time": 123456}]
 
         chosen, mode = choose_channel_video(self.mock_candidates, latest_ratio=1.0)
         self.assertEqual(mode, "LATEST_PRIORITY")
-        self.assertEqual(chosen["href"], "/watch?v=newest_2")
+        self.assertEqual(chosen["href"], "/watch?v=newest_1")
+        self.assertEqual(chosen["title"], "Video Horrornologi #1 (Paling Baru)")
+
+    def test_choose_channel_video_single_candidate(self):
+        single = [{"title": "Only Video", "href": "/watch?v=single", "duration_sec": 600}]
+        chosen_latest, mode_latest = choose_channel_video(single, latest_ratio=1.0)
+        self.assertEqual(chosen_latest["href"], "/watch?v=single")
+        self.assertEqual(mode_latest, "LATEST_PRIORITY")
+
+        chosen_cat, mode_cat = choose_channel_video(single, latest_ratio=0.0)
+        self.assertEqual(chosen_cat["href"], "/watch?v=single")
+        self.assertEqual(mode_cat, "CATALOG_ROTATION")
 
     def test_choose_channel_video_empty(self):
         chosen, mode = choose_channel_video([])
@@ -73,6 +87,18 @@ class TestChannelSelectionAndFlow(unittest.TestCase):
         self.assertIn("visibilityState", script)
         self.assertIn("'hidden'", script)
         self.assertIn("hasFocus", script)
+
+    def test_parse_duration_string_formats(self):
+        # Format Indonesia (dot: 14.54, 22.35)
+        self.assertEqual(parse_duration_string("14.54"), 14 * 60 + 54)
+        self.assertEqual(parse_duration_string("22.35"), 22 * 60 + 35)
+        # Format standar (colon: 14:54, 1:15:30)
+        self.assertEqual(parse_duration_string("14:54"), 14 * 60 + 54)
+        self.assertEqual(parse_duration_string("1:15:30"), 3600 + 15 * 60 + 30)
+        self.assertEqual(parse_duration_string("1.15.30"), 3600 + 15 * 60 + 30)
+        # String kosong / invalid
+        self.assertEqual(parse_duration_string(""), 0)
+        self.assertEqual(parse_duration_string("invalid"), 0)
 
 if __name__ == "__main__":
     unittest.main()

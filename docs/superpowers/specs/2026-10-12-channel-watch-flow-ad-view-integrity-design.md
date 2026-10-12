@@ -84,36 +84,30 @@ The user requested refactoring the YouTube watching workflow and strengthening v
 In YouTube channel's `/videos` tab, videos are listed in chronological order (index 0 is the newest release).
 - Algorithm specification:
   ```python
-  def choose_channel_video(candidates: list) -> dict | None:
+  def choose_channel_video(candidates: list, latest_ratio: float = 0.50) -> tuple[dict | None, str]:
       if not candidates:
-          return None
+          return None, "NONE"
       
-      # 50% chance to pick from top newest videos
-      is_latest = random.random() < 0.50
+      # 50% chance to pick strictly the latest video
+      is_latest = random.random() < latest_ratio
       
-      stats = load_video_stats()
-      recents = get_recent_videos()
-      recent_ids = {r.get("id") for r in recents}
-      
-      if is_latest and len(candidates) >= 1:
-          # Pool of top newest videos (top 3)
-          top_pool = candidates[:min(3, len(candidates))]
-          # Choose the one with lowest watch_count among top_pool
-          def score_top(c):
-              v_id = extract_video_id(c.get("href", ""))
-              watch_cnt = stats.get(v_id, {}).get("watch_count", 0)
-              is_recent = 500 if v_id in recent_ids else 0
-              return watch_cnt + is_recent + random.uniform(0.0, 0.2)
-          return sorted(top_pool, key=score_top)[0]
+      if is_latest:
+          # Mutlak video terbaru: index 0 (rilis paling anyar tanpa diacak/ditebak)
+          return candidates[0], "LATEST_PRIORITY"
       else:
-          # Pool of remaining catalog
-          catalog_pool = candidates[3:] if len(candidates) > 3 else candidates
+          # Rotasi katalog video lainnya (index >= 1)
+          catalog_pool = candidates[1:] if len(candidates) > 1 else candidates
+          stats = load_video_stats()
+          recents = get_recent_videos()
+          recent_ids = {r.get("id") for r in recents}
+          
           def score_catalog(c):
               v_id = extract_video_id(c.get("href", ""))
               watch_cnt = stats.get(v_id, {}).get("watch_count", 0)
               is_recent = 1000 if v_id in recent_ids else 0
               return watch_cnt + is_recent + random.uniform(0.0, 0.4)
-          return sorted(catalog_pool, key=score_catalog)[0]
+          
+          return sorted(catalog_pool, key=score_catalog)[0], "CATALOG_ROTATION"
   ```
 
 ### 3.3 Guaranteed View Counting & Anti-Headless Throttling
