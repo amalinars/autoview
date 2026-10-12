@@ -25,7 +25,15 @@ class TestCLIWebIntegration(unittest.TestCase):
         # Verify Live SSE Stream
         import urllib.request
         req = urllib.request.Request("http://127.0.0.1:5099/api/stream")
-        with urllib.request.urlopen(req, timeout=3.0) as resp:
+        resp = None
+        for _ in range(10):
+            try:
+                resp = urllib.request.urlopen(req, timeout=3.0)
+                break
+            except Exception:
+                time.sleep(0.3)
+        self.assertIsNotNone(resp)
+        with resp:
             self.assertEqual(resp.status, 200)
             self.assertIn("text/event-stream", resp.headers.get("content-type"))
             line1 = resp.readline().decode()

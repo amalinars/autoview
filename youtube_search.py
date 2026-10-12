@@ -351,8 +351,15 @@ def generate_stealth_script(fp: dict) -> str:
             );
         }} catch(e) {{}}
 
-        // 10. Auto-hide residual GDPR consent bump
-        // 10. Auto-hide residual GDPR consent bump & YouTube Premium / promo modals
+        // 10. Foreground Tab & Focus Spoofing (Anti-Headless & Anti-Throttling VPS/Local)
+        try {{
+            Object.defineProperty(document, 'visibilityState', {{ get: () => 'visible' }});
+            Object.defineProperty(document, 'hidden', {{ get: () => false }});
+            document.hasFocus = () => true;
+            window.onblur = null;
+        }} catch(e) {{}}
+
+        // 11. Auto-hide residual GDPR consent bump & YouTube Premium / promo modals
         window.addEventListener('DOMContentLoaded', () => {{
             try {{
                 const s = document.createElement('style');
@@ -838,30 +845,61 @@ def record_watched_video(video_href: str, title: str):
     except Exception:
         pass
 
-def choose_least_recent_video(candidates: list) -> dict | None:
+def choose_channel_video(candidates: list, latest_ratio: float = 0.50) -> tuple[dict | None, str]:
     """
-    Pilih video secara pintar agar frekuensi tayang seimbang & adil:
-    1. Ambil data frekuensi watch_count dari database video_watch_stats.json.
-    2. Utamakan video dengan watch_count paling sedikit (video yang belum pernah/jarang ditonton).
-    3. Di antara kandidat dengan watch_count terendah, hindari 4 video yang baru saja ditonton.
+    Pilih video dari tab /videos channel Horrornologi dengan rasio 50/50:
+    - 50% Probabilitas: Memprioritaskan TOP video terbaru (urutan 1-3 teratas di tab Videos channel).
+      Di antara video-video terbaru tersebut, dipilih yang memiliki watch_count paling sedikit
+      agar tontonan terbagi rata di rilis-rilis terbaru.
+    - 50% Probabilitas: Memilih dari katalog channel lainnya menggunakan algoritma least-recent rotation
+      agar penonton tampak organik menjelajahi seluruh konten video Horrornologi.
     """
     if not candidates:
-        return None
+        return None, "NONE"
+
     stats = load_video_stats()
     recents = get_recent_videos()
     recent_ids = {r.get("id") for r in recents}
 
-    def score(c):
+    def get_vid_id(c):
         href = c.get("href", "")
-        v_id = href.split("&")[0].split("=")[-1] if "v=" in href else href
-        watch_cnt = stats.get(v_id, {}).get("watch_count", 0)
-        # Penalti tinggi jika baru saja ditonton di 4 sesi terakhir
-        is_recent = 1000 if v_id in recent_ids else 0
-        # Tambahkan sedikit random jitter agar video dengan frekuensi sama tidak dipilih secara statis
-        return watch_cnt + is_recent + random.uniform(0.0, 0.4)
+        return href.split("&")[0].split("=")[-1] if "v=" in href else href
 
-    sorted_candidates = sorted(candidates, key=score)
-    return sorted_candidates[0]
+    # Tentukan apakah sesi ini memilih video terbaru atau katalog
+    pick_latest = (random.random() < latest_ratio)
+
+    # Top pool: 1 - 3 video paling atas (terbaru)
+    top_n = min(3, len(candidates))
+    top_candidates = candidates[:top_n]
+    catalog_candidates = candidates[top_n:] if len(candidates) > top_n else candidates
+
+    if pick_latest and top_candidates:
+        def score_latest(c):
+            v_id = get_vid_id(c)
+            watch_cnt = stats.get(v_id, {}).get("watch_count", 0)
+            # Penalti ringan jika baru ditonton di sesi sebelumnya agar bergantian antar video baru
+            is_recent = 200 if v_id in recent_ids else 0
+            return watch_cnt + is_recent + random.uniform(0.0, 0.2)
+
+        sorted_top = sorted(top_candidates, key=score_latest)
+        return sorted_top[0], "LATEST_PRIORITY"
+    else:
+        def score_catalog(c):
+            v_id = get_vid_id(c)
+            watch_cnt = stats.get(v_id, {}).get("watch_count", 0)
+            # Penalti ketat jika baru ditonton di 4 sesi terakhir
+            is_recent = 1000 if v_id in recent_ids else 0
+            return watch_cnt + is_recent + random.uniform(0.0, 0.4)
+
+        sorted_catalog = sorted(catalog_candidates, key=score_catalog)
+        return sorted_catalog[0], "CATALOG_ROTATION"
+
+def choose_least_recent_video(candidates: list) -> dict | None:
+    """
+    Pilih video secara pintar agar frekuensi tayang seimbang & adil (kompatibilitas backward).
+    """
+    chosen, _ = choose_channel_video(candidates, latest_ratio=0.50)
+    return chosen
 
 def find_videos_on_channel_page(page, target_chan: str = "horrornologi") -> list:
     """
@@ -870,7 +908,7 @@ def find_videos_on_channel_page(page, target_chan: str = "horrornologi") -> list
     Memfilter video pendek (< 5 menit) dan hanya mengambil film recap panjang.
     Memverifikasi URL halaman adalah channel target.
     """
-    target = target_chan.lower().strip()
+    target = target_chan.lower().strip().lstrip("@")
     if target not in (page.url or "").lower():
         return []
 
@@ -946,20 +984,31 @@ def navigate_to_channel_from_search(page, target_chan: str = "horrornologi") -> 
     Berpindah ke halaman channel creator resmi Horrornologi (Tab Videos).
     Memverifikasi secara ketat bahwa channel yang dikunjungi adalah benar-benar Horrornologi.
     """
-    target = target_chan.lower().strip()
+    target = target_chan.lower().strip().lstrip("@")
     
     # 1. Cari kartu channel resmi di bagian atas hasil pencarian
     clicked = False
     try:
-        loc = page.locator(f"ytd-channel-renderer a[href*='{target}'], ytd-channel-renderer:has-text('{target}') a").first
-        if loc.is_visible(timeout=1500):
-            loc.scroll_into_view_if_needed()
-            time.sleep(0.4)
-            loc.click()
-            for _ in range(8):
-                time.sleep(0.5)
-                if target in (page.url or "").lower():
-                    clicked = True
+        channel_selectors = [
+            f"ytd-channel-renderer a[href*='{target}']",
+            f"ytd-channel-renderer:has-text('{target}') a",
+            f"a[href*='/@{target}']",
+            f"#channel-title:has-text('{target}')",
+            f"ytd-channel-name:has-text('{target}') a",
+            f"ytd-channel-renderer"
+        ]
+        for sel in channel_selectors:
+            loc = page.locator(sel).first
+            if loc.is_visible(timeout=800):
+                loc.scroll_into_view_if_needed()
+                time.sleep(0.3)
+                loc.click()
+                for _ in range(8):
+                    time.sleep(0.5)
+                    if target in (page.url or "").lower():
+                        clicked = True
+                        break
+                if clicked:
                     break
     except Exception:
         pass
@@ -973,7 +1022,7 @@ def navigate_to_channel_from_search(page, target_chan: str = "horrornologi") -> 
         except Exception:
             return False
 
-    # 3. VERIFIKASI KETAT: Pastikan URL dan konten halaman adalah benar channel Horrornologi!
+    # 3. VERIFIKASI KETAT: Pastikan URL dan konten halaman adalah benar channel target!
     curr_url = (page.url or "").lower()
     if target not in curr_url:
         return False
@@ -1000,7 +1049,7 @@ def verify_watch_page_channel(page, target_chan: str = "horrornologi", max_retri
     100% Memastikan video HANYA milik channel Horrornologi.
     Menolak keras video dari channel lain (Liminal Spaces, Info Giraffe, NOICE, dll).
     """
-    target = target_chan.lower().strip()
+    target = target_chan.lower().strip().lstrip("@")
     for _ in range(max_retries):
         try:
             res = page.evaluate("""(target) => {
@@ -1180,6 +1229,17 @@ def optimize_playback(page):
                 if (typeof player.setPlaybackQuality === 'function') {
                     player.setPlaybackQuality('tiny');
                 }
+                if (typeof player.unMute === 'function') {
+                    player.unMute();
+                }
+                if (typeof player.setVolume === 'function') {
+                    player.setVolume(Math.floor(Math.random() * 20) + 35);
+                }
+            }
+            const video = document.querySelector('video.html5-main-video') || document.querySelector('video');
+            if (video) {
+                video.muted = false;
+                video.volume = 0.45;
             }
         }""")
     except Exception:
@@ -1285,7 +1345,16 @@ def watch_video_with_lock(page, worker_name: str, video_title: str, min_percent:
     try:
         page.evaluate("""() => {
             const v = document.querySelector('video.html5-main-video') || document.querySelector('video');
-            if (v && v.paused) v.play().catch(() => {});
+            if (v) {
+                if (v.paused) v.play().catch(() => {});
+                v.muted = false;
+                v.volume = 0.45;
+            }
+            const player = document.querySelector('#movie_player');
+            if (player) {
+                if (typeof player.unMute === 'function') player.unMute();
+                if (typeof player.setVolume === 'function') player.setVolume(Math.floor(Math.random() * 20) + 35);
+            }
         }""")
     except Exception:
         pass
@@ -1743,70 +1812,41 @@ def worker_process_main(worker_id: int, args, proxy_list: list, success_counter,
                     continue
 
                 # =========================================================================
-                # 2-WAY NAVIGATION STRATEGY (Search Langsung vs Search ➔ Masuk Channel Page)
-                # Dilengkapi AUTO-FALLBACK agar SEMUA video resmi Horrornologi tertonton merata
-                # dan TIDAK PERNAH membuka video milik channel lain!
+                # STRICT CHANNEL-ONLY FLOW (Search ➔ Masuk Channel Page @horrornologi ➔ Pilih Video)
+                # JALUR LANGSUNG SEARCH HASIL PENCARIAN DIHAPUS TOTAL.
+                # 100% Video dipastikan milik resmi channel Horrornologi.
+                # Prioritas: 50% Video Terbaru & 50% Rotasi Katalog Channel.
                 # =========================================================================
-                use_channel_way = (random.random() < 0.55)
-                chosen_video = None
-                way_name = ""
+                safe_log(worker_name, f"🧭 Menjalankan alur resmi: Search '{search_kw}' ➔ Masuk Channel @{target_chan}...", CYAN)
+                send_telemetry(worker_id, "status_change", status="MASUK_CHANNEL", details=f"Masuk channel @{target_chan}...")
 
-                if use_channel_way:
-                    way_name = "Jalur 2 (Search ➔ Masuk Channel Page ➔ Katalog Lengkap)"
-                    safe_log(worker_name, f"🧭 Mencoba {way_name}...", CYAN)
-                    send_telemetry(worker_id, "status_change", status="MASUK_CHANNEL", details=f"Masuk channel @{target_chan}...")
-                    
-                    nav_ok = navigate_to_channel_from_search(page, target_chan)
-                    if nav_ok:
-                        handle_consent_popup(page)
-                        channel_videos = find_videos_on_channel_page(page, target_chan)
-                        if channel_videos:
-                            chosen_video = choose_least_recent_video(channel_videos)
-                            safe_log(worker_name, f"Ditemukan {len(channel_videos)} video di channel. Memilih variasi yang belum ditonton...", GREEN)
-
-                # Jika Jalur 1 terpilih ATAU Jalur 2 tidak menemukan video, gunakan Jalur 1 (Hasil Pencarian Langsung)
-                if not chosen_video:
-                    way_name = "Jalur 1 (Search Langsung ➔ Video Hasil Pencarian)"
-                    safe_log(worker_name, f"🧭 Mencoba {way_name}...", CYAN)
-                    if "/results" not in (page.url or ""):
-                        try:
-                            page.goto(f"https://www.youtube.com/results?search_query={search_kw}", wait_until="domcontentloaded", timeout=25000)
-                            time.sleep(1.5)
-                        except Exception:
-                            pass
-                    else:
-                        time.sleep(1.0)
-
-                    matching_videos = find_channel_videos(page, target_chan)
-                    if not matching_videos:
-                        for s in range(3):
-                            safe_log(worker_name, f"Memuat lebih banyak hasil pencarian (scroll {s+1}/3)...", CYAN)
-                            safe_evaluate(page, "() => window.scrollBy(0, 800)")
-                            time.sleep(1.2)
-                            matching_videos = find_channel_videos(page, target_chan)
-                            if matching_videos:
-                                break
-
-                    if matching_videos:
-                        chosen_video = choose_least_recent_video(matching_videos)
-
-                # Jika Jalur 1 awalnya terpilih tapi gagal menemukan video, FALLBACK ke Jalur 2 (Masuk Channel Page Langsung)
-                if not chosen_video and not use_channel_way:
-                    safe_log(worker_name, f"Hasil pencarian tidak ada video resmi. Fallback ke Jalur 2 (Channel Page)...", CYAN)
-                    nav_ok = navigate_to_channel_from_search(page, target_chan)
-                    if nav_ok:
-                        handle_consent_popup(page)
-                        channel_videos = find_videos_on_channel_page(page, target_chan)
-                        if channel_videos:
-                            chosen_video = choose_least_recent_video(channel_videos)
-                            way_name = "Jalur 2 (Fallback Channel Page)"
-                            safe_log(worker_name, f"Ditemukan {len(channel_videos)} video di channel setelah fallback.", GREEN)
-
-                # PERLINDUNGAN KETAT: Jika tidak ada video dari channel Horrornologi, JANGAN PERNAH klik video sembarang!
-                if not chosen_video:
-                    safe_log(worker_name, f"❌ Tidak ditemukan video resmi dari channel '{target_chan.upper()}'. Menolak membuka video sembarang!", RED)
-                    send_telemetry(worker_id, "session_failed", status="GAGAL", details="Video channel tidak cocok")
+                nav_ok = navigate_to_channel_from_search(page, target_chan)
+                if not nav_ok:
+                    safe_log(worker_name, f"⚠️ Gagal navigasi ke channel @{target_chan}. Melewati sesi...", YELLOW)
+                    send_telemetry(worker_id, "session_failed", status="GAGAL_CHANNEL", details="Gagal masuk channel")
                     continue
+
+                handle_consent_popup(page)
+                channel_videos = find_videos_on_channel_page(page, target_chan)
+
+                if not channel_videos:
+                    # Coba scroll jika katalog belum sempat ter-render sempurna
+                    safe_evaluate(page, "() => window.scrollBy(0, 600)")
+                    time.sleep(1.2)
+                    channel_videos = find_videos_on_channel_page(page, target_chan)
+
+                if not channel_videos:
+                    safe_log(worker_name, f"❌ Tidak ditemukan video resmi di tab Videos @{target_chan}!", RED)
+                    send_telemetry(worker_id, "session_failed", status="TIDAK_ADA_VIDEO", details="Katalog video kosong")
+                    continue
+
+                chosen_video, selection_mode = choose_channel_video(channel_videos, latest_ratio=0.50)
+                if not chosen_video:
+                    safe_log(worker_name, f"❌ Gagal memilih video dari katalog @{target_chan}!", RED)
+                    continue
+
+                mode_label = "🔥 50% Video Terbaru" if selection_mode == "LATEST_PRIORITY" else "🎲 50% Rotasi Katalog"
+                safe_log(worker_name, f"[{mode_label}] Terpilih: '{chosen_video['title'][:40]}...' [{chosen_video.get('duration_str', 'N/A')}] (dari {len(channel_videos)} video)", GREEN)
 
                 chosen_title = chosen_video["title"]
                 expected_dur = chosen_video.get("duration_sec", 0)
